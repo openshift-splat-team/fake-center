@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -44,17 +45,34 @@ func detectRuntime() (runner, error) {
 }
 
 func buildRunArgs(ip, name string, scenario []byte) []string {
+	return buildRunArgsPort(ip, name, scenario, "443")
+}
+
+func buildRunArgsPort(ip, name string, scenario []byte, port string) []string {
 	image := os.Getenv("FAKE_CENTER_IMAGE")
 	if image == "" {
 		image = "quay.io/ocp-splat/fake-center:latest"
 	}
 	return []string{
 		"run", "--detach", "--name", name,
-		"--publish", net.JoinHostPort(ip, "443") + ":443",
+		"--publish", net.JoinHostPort(ip, port) + ":443",
 		"--env", "FAKE_CENTER_SCENARIO=" + string(scenario),
 		"--env", "FAKE_CENTER_SANS=" + ip,
 		image,
 	}
+}
+
+func publishedServer(ctx context.Context, runtime runner, name, ip string) (string, error) {
+	output, err := runtime.run(ctx, "port", name, "443/tcp")
+	if err != nil {
+		return "", fmt.Errorf("resolve published port: %w", err)
+	}
+	host, port, err := net.SplitHostPort(strings.TrimSpace(output))
+	number, portErr := strconv.Atoi(port)
+	if err != nil || host != ip || portErr != nil || number < 1024 || number > 65535 {
+		return "", fmt.Errorf("unexpected ephemeral port mapping %q for %s", output, ip)
+	}
+	return "https://" + net.JoinHostPort(host, port), nil
 }
 
 var loopbacks = struct {

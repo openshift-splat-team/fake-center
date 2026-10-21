@@ -5,18 +5,23 @@ package fakecenter
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestStartNoRuntime(t *testing.T) {
@@ -24,6 +29,74 @@ func TestStartNoRuntime(t *testing.T) {
 	_, err := Start(t, "testdata/minimal.yaml")
 	if err == nil || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") || !strings.Contains(err.Error(), "install") {
 		t.Fatalf("expected actionable runtime installation error, got %v", err)
+	}
+}
+
+type integrationTB struct {
+	testing.TB
+	fallback bool
+}
+
+func (tb *integrationTB) Log(args ...any) {
+	if strings.Contains(fmt.Sprint(args...), "443 fidelity") {
+		tb.fallback = true
+	}
+	tb.TB.Log(args...)
+}
+
+func TestStartIntegration(t *testing.T) {
+	if os.Getenv("FAKE_CENTER_IMAGE") == "" {
+		t.Skip("set FAKE_CENTER_IMAGE to run container integration tests")
+	}
+	if _, err := detectRuntime(); err != nil {
+		t.Skip(err)
+	}
+	tb := &integrationTB{TB: t}
+	v, err := Start(tb, "testdata/minimal.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(v.Server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Scheme != "https" || !regexp.MustCompile(`^127\.0\.0\.\d+$`).MatchString(u.Hostname()) {
+		t.Fatalf("Server must be an HTTPS loopback URL: %s", v.Server)
+	}
+	if tb.fallback {
+		port, err := strconv.Atoi(u.Port())
+		if err != nil || port < 1024 || port > 65535 {
+			t.Fatalf("fallback Server must carry a high port: %s", v.Server)
+		}
+		t.Log("exercised fallback publication:", v.Server)
+	} else {
+		if u.Port() != "" || u.Host != u.Hostname() {
+			t.Fatalf("primary Server must have no port suffix: %s", v.Server)
+		}
+		t.Log("exercised primary port-443 publication:", v.Server)
+	}
+	if len(v.CABundle) == 0 {
+		t.Fatal("CABundle is empty")
+	}
+	wantAccounts := []AccountRef{{Username: "installer", Password: "fake-center"}}
+	if !reflect.DeepEqual(v.Accounts, wantAccounts) {
+		t.Fatalf("Accounts = %#v, want %#v", v.Accounts, wantAccounts)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(v.CABundle) {
+		t.Fatal("CABundle contains no certificates")
+	}
+	address := u.Host
+	if u.Port() == "" {
+		address = net.JoinHostPort(u.Hostname(), "443")
+	}
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", address, &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatalf("TLS verification with CABundle and loopback SAN: %v", err)
+	}
+	defer conn.Close()
+	if len(conn.ConnectionState().VerifiedChains) == 0 {
+		t.Fatal("TLS connection has no verified certificate chain")
 	}
 }
 
@@ -286,6 +359,8 @@ func TestStartRetriesImmediatePublishCollision(t *testing.T) {
 		{name: "port in use", launchErr: errors.New("PORT IS ALREADY IN USE"), wantRuns: 2},
 		{name: "retry bounded", launchErr: errors.New("address already in use"), persistent: true, wantRuns: 2, wantError: true},
 		{name: "unrelated failure", launchErr: errors.New("image pull denied"), wantRuns: 1, wantError: true},
+		{name: "unrelated permission failure", launchErr: errors.New("exec /entrypoint: permission denied"), wantRuns: 1, wantError: true},
+		{name: "collision takes precedence", launchErr: errors.New("bind: address already in use; permission denied"), wantRuns: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +404,93 @@ func TestStartRetriesImmediatePublishCollision(t *testing.T) {
 			tb.cleanups = nil
 			if !reflect.DeepEqual(removed, names) {
 				t.Fatalf("removed containers = %v, launched = %v", removed, names)
+			}
+		})
+	}
+}
+
+func TestStartFallsBackOnPublishPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		output     string
+		launchErr  error
+		persistent bool
+	}{
+		{name: "command output", output: "pasta: Failed to bind port 443: Permission denied", launchErr: errors.New("exit status 125")},
+		{name: "command error", launchErr: errors.New("listen tcp 127.0.0.2:443: bind: permission denied")},
+		{name: "operation not permitted", launchErr: errors.New("bind: operation not permitted")},
+		{name: "rootlessport", output: "rootlessport cannot expose privileged port 443", launchErr: errors.New("exit status 125")},
+		{name: "fallback bounded", launchErr: errors.New("bind: permission denied"), persistent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/accounts.json" {
+					fmt.Fprint(w, "[]")
+				}
+			})
+			var calls [][]string
+			var runs int
+			runtime := runnerFunc(func(_ context.Context, args ...string) (string, error) {
+				calls = append(calls, append([]string(nil), args...))
+				switch args[0] {
+				case "run":
+					runs++
+					if runs == 1 || tc.persistent {
+						return tc.output, tc.launchErr
+					}
+				case "port":
+					ip := strings.Split(calls[0][5], ":")[0]
+					return ip + ":49152\n", nil
+				}
+				return "", nil
+			})
+			tb := &recordedTB{TB: t}
+			defer tb.cleanup()
+			v, err := startWithRuntime(tb, "testdata/minimal.yaml", runtime, client)
+			if (err != nil) != tc.persistent {
+				t.Fatalf("startup error = %v, want error = %v", err, tc.persistent)
+			}
+			if runs != 2 {
+				t.Fatalf("launches = %d, want exactly 2", runs)
+			}
+			ip := strings.Split(calls[0][5], ":")[0]
+			if calls[0][5] != ip+":443:443" || calls[1][0] != "rm" || calls[2][0] != "run" || calls[2][5] != ip+"::443" || calls[2][9] != "FAKE_CENTER_SANS="+ip {
+				t.Fatalf("expected primary publication, removal, then ephemeral publication with same SAN: %v", calls)
+			}
+			if !tc.persistent {
+				if v.Server != "https://"+ip+":49152" {
+					t.Fatalf("fallback Server = %s", v.Server)
+				}
+				if !reflect.DeepEqual(calls[3], []string{"port", calls[2][3], "443/tcp"}) {
+					t.Fatalf("port resolution = %v", calls[3])
+				}
+			}
+			if len(tb.logs) != 1 || !strings.Contains(tb.logs[0], "443 fidelity") || !strings.Contains(tb.logs[0], "port-handling bugs") || !strings.Contains(tb.logs[0], "sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0") {
+				t.Fatalf("missing fallback warning/remediation: %v", tb.logs)
+			}
+		})
+	}
+}
+
+func TestPublishedServerRejectsInvalidMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		err    error
+	}{
+		{name: "runtime error", err: errors.New("port lookup failed")},
+		{name: "empty mapping"},
+		{name: "wrong host", output: "0.0.0.0:49152\n"},
+		{name: "privileged port", output: "127.0.0.7:443\n"},
+		{name: "out of range", output: "127.0.0.7:65536\n"},
+		{name: "non-numeric port", output: "127.0.0.7:invalid\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := runnerFunc(func(context.Context, ...string) (string, error) {
+				return tc.output, tc.err
+			})
+			if server, err := publishedServer(context.Background(), runtime, "test-container", "127.0.0.7"); err == nil || server != "" {
+				t.Fatalf("invalid mapping produced Server %q, error %v", server, err)
 			}
 		})
 	}

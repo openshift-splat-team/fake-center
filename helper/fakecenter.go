@@ -25,8 +25,9 @@ import (
 // AccountRef contains credentials for a scenario account.
 type AccountRef struct{ Username, Password string }
 
-// VCenter describes a running fake-center instance. Server has no port suffix:
-// the HTTPS endpoint always uses port 443.
+// VCenter describes a running fake-center instance. Server normally has no port
+// suffix (HTTPS port 443). If the runtime cannot publish a privileged port, Start
+// logs a fidelity warning and Server includes an ephemeral high port instead.
 type VCenter struct {
 	Server   string
 	CABundle []byte
@@ -91,6 +92,7 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 	if err != nil {
 		return nil, err
 	}
+	fallbackUsed := false
 	for attempt := 0; attempt < 2; attempt++ {
 		name, err := containerName(tb.Name())
 		if err != nil {
@@ -120,11 +122,29 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		tb.Cleanup(cleanup)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		launchOutput, launchErr := runtime.run(ctx, buildRunArgs(ip, name, scenario)...)
+		server := "https://" + ip
+		if launchErr != nil && !fallbackUsed && isPublishPermission(launchOutput+"\n"+launchErr.Error()) {
+			fallbackUsed = true
+			tb.Log("WARNING: falling back to an ephemeral high port; degraded 443 fidelity means component port-handling bugs won't be caught locally in this mode. For strict local 443, run once: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0")
+			// A failed publish can leave a named container behind. Keep the IP
+			// reserved and remove that container before the single fallback launch.
+			output, removeErr := runtime.run(ctx, "rm", "-f", name)
+			if removeErr != nil && !strings.Contains(strings.ToLower(output+removeErr.Error()), "no such container") {
+				launchErr = fmt.Errorf("remove failed port-443 container: %w", removeErr)
+			} else {
+				// An omitted host port requests an ephemeral port in both
+				// runtimes; podman rejects an explicit host port of zero.
+				launchOutput, launchErr = runtime.run(ctx, buildRunArgsPort(ip, name, scenario, "")...)
+				if launchErr == nil {
+					server, launchErr = publishedServer(ctx, runtime, name, ip)
+				}
+			}
+		}
 		launchCollision := launchErr != nil && (isPublishCollision(launchOutput) || isPublishCollision(launchErr.Error()))
 		err = launchErr
 		var v *VCenter
 		if err == nil {
-			v, err = waitForVCenter(ctx, client, "https://"+ip)
+			v, err = waitForVCenter(ctx, client, server)
 		}
 		if err == nil {
 			cancel()
@@ -144,7 +164,7 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		if logErr != nil {
 			startupErr = fmt.Errorf("%w\nread container logs: %v", startupErr, logErr)
 		}
-		if attempt == 0 && publishCollision {
+		if attempt == 0 && publishCollision && !fallbackUsed {
 			// Reserve the next address while the failed one is still held.
 			nextIP, allocErr := allocLoopback()
 			cleanup()
@@ -158,6 +178,16 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		return nil, startupErr
 	}
 	panic("unreachable")
+}
+
+func isPublishPermission(output string) bool {
+	output = strings.ToLower(output)
+	permission := strings.Contains(output, "permission denied") ||
+		strings.Contains(output, "operation not permitted") ||
+		strings.Contains(output, "cannot expose privileged port")
+	bind := strings.Contains(output, "bind") || strings.Contains(output, "listen") ||
+		strings.Contains(output, "privileged port")
+	return permission && bind && !isPublishCollision(output)
 }
 
 func isPublishCollision(output string) bool {
