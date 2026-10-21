@@ -5,6 +5,7 @@ package scenario
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -136,6 +137,40 @@ func TestLoadErrors(t *testing.T) {
 			t.Fatalf("Load error = %v, want missing file", err)
 		}
 	})
+}
+
+func TestLoadDocumentBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		wantErr bool
+	}{
+		{name: "single document", data: "failureDomains: [{}]\n"},
+		{name: "trailing comments", data: "failureDomains: [{}]\n# end of scenario\n\n"},
+		{name: "unknown key in second document", data: "failureDomains: [{}]\n---\nunexpected: true\n", wantErr: true},
+		{name: "valid second document", data: "failureDomains: [{}]\n---\nfailureDomains: [{}]\n", wantErr: true},
+		{name: "empty second document", data: "failureDomains: [{}]\n---\n", wantErr: true},
+		{name: "trailing malformed YAML", data: "failureDomains: [{}]\n---\naccounts: [\n", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "scenario.yaml")
+			if err := os.WriteFile(path, []byte(test.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s, err := Load(path)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Load error = %v, want error %t", err, test.wantErr)
+			}
+			if test.wantErr {
+				if s != nil {
+					t.Fatalf("Load returned scenario on error: %+v", s)
+				}
+			} else if len(s.FailureDomains) != 1 || s.FailureDomains[0].Name != "fd1" {
+				t.Fatalf("unexpected loaded scenario: %+v", s)
+			}
+		})
+	}
 }
 
 func TestValidate(t *testing.T) {

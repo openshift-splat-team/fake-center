@@ -6,6 +6,7 @@ package scenario
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/openshift-splat-team/fake-center/internal/privsets"
@@ -29,6 +30,13 @@ func Parse(data []byte) (*Scenario, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&s); err != nil {
 		return nil, fmt.Errorf("decode scenario: %w", err)
+	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("decode trailing scenario data: %w", err)
+		}
+		return nil, fmt.Errorf("scenario must contain exactly one YAML document")
 	}
 	s.applyDefaults()
 	if err := s.validate(); err != nil {
