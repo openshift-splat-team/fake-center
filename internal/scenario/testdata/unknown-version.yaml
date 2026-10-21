@@ -1,0 +1,4 @@
+vcenter:
+  version: "7.0.0"
+failureDomains:
+- name: fd1

@@ -1,0 +1,7 @@
+failureDomains:
+- name: fd1
+accounts:
+- name: installer
+  grants:
+  - role: admin
+    on: [fd1]

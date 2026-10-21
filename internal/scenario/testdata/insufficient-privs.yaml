@@ -1,0 +1,14 @@
+vcenter:
+  version: "8.0.2"
+failureDomains:
+- name: fd1
+- name: fd2
+- name: fd3
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    on: [fd1, fd3]
+  - role: openshift-installer
+    missing: [VirtualMachine.Inventory.Create]
+    on: [fd2]

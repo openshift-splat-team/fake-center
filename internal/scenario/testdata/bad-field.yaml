@@ -1,0 +1,3 @@
+failureDomains:
+- name: fd1
+  typo: unexpected
