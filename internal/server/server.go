@@ -48,6 +48,10 @@ type Server struct {
 	closeOnce sync.Once
 }
 
+// The fork's simulator uses a process-global ESXi product template. Serialize
+// its mutation and all model creation/staging that consumes that template.
+var hostTemplateMu sync.Mutex
+
 // New starts the simulator and returns only after scenario staging is complete.
 func New(sc *scenario.Scenario, opts Options) (*Server, error) {
 	if sc == nil {
@@ -62,6 +66,8 @@ func New(sc *scenario.Scenario, opts Options) (*Server, error) {
 	model.Host, model.Datastore, model.Machine = 0, 0, 0
 	model.Pool, model.App, model.Pod, model.Folder = 0, 0, 0, 0
 	model.Autostart = false
+	hostTemplateMu.Lock()
+	defer hostTemplateMu.Unlock()
 	masquerade(model, sc.VCenter)
 	if err := model.Create(); err != nil {
 		return nil, fmt.Errorf("create simulator: %w", err)
