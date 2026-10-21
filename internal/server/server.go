@@ -29,7 +29,6 @@ import (
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/simulator"
 	"github.com/vmware/govmomi/simulator/esx"
-	"github.com/vmware/govmomi/vim25"
 
 	// Register the simulator's REST/vAPI endpoints.
 	_ "github.com/vmware/govmomi/vapi/simulator"
@@ -186,11 +185,6 @@ func (s *Server) Close() error {
 		}
 		s.model.Remove()
 	})
-	return nil
-}
-
-// Replaced by permission staging in Task 6.
-func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
 	return nil
 }
 

@@ -15,7 +15,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -24,9 +27,12 @@ import (
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/session"
 	"github.com/vmware/govmomi/vapi/rest"
+	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/mo"
+	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
 )
 
@@ -287,6 +293,197 @@ func loopbackClient(t *testing.T, s *Server) *govmomi.Client {
 	}
 	t.Cleanup(func() { _ = c.Logout(context.Background()) })
 	return c
+}
+
+func installerClient(t *testing.T, s *Server) *vim25.Client {
+	t.Helper()
+	u, err := url.Parse(s.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, s.CAPEM(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	soapClient := soap.NewClient(u, false)
+	t.Cleanup(soapClient.CloseIdleConnections)
+	if err := soapClient.SetRootCAs(caFile); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	c, err := vim25.NewClient(ctx, soapClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionMgr := session.NewManager(c)
+	if err := sessionMgr.Login(ctx, url.UserPassword("installer", "fake-center")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sessionMgr.Logout(ctx) })
+	return c
+}
+
+func TestPrivilegeGap(t *testing.T) {
+	s := newTestServer(t)
+	c := installerClient(t, s)
+	ctx := context.Background()
+	finder := find.NewFinder(c)
+	auth := object.NewAuthorizationManager(c)
+	for _, tc := range []struct {
+		name      string
+		privilege string
+		want      bool
+	}{
+		{"fd2", "VirtualMachine.Inventory.Create", false},
+		{"fd1", "VirtualMachine.Inventory.Create", true},
+		{"fd3", "VirtualMachine.Inventory.Create", true},
+		{"root", "Cns.Searchable", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entity := c.ServiceContent.RootFolder
+			if tc.name != "root" {
+				dc, err := finder.Datacenter(ctx, tc.name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entity = dc.Reference()
+			}
+			results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{entity}, "installer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 1 || results[0].Entity != entity {
+				t.Fatalf("privilege results = %+v, want one result for %s", results, entity)
+			}
+			if got := slices.Contains(results[0].Privileges, tc.privilege); got != tc.want {
+				t.Errorf("%s contains %s = %t, want %t", tc.name, tc.privilege, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoAccountsScenario(t *testing.T) {
+	sc, err := scenario.Parse([]byte("failureDomains: [{}]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	c := loopbackClient(t, s)
+	permissions, err := object.NewAuthorizationManager(c.Client).RetrieveAllPermissions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the simulator's three built-in administrator permissions remain.
+	want := []types.Permission{
+		{Entity: &c.ServiceContent.RootFolder, Principal: "root", Group: true, RoleId: -1, Propagate: true},
+		{Entity: &c.ServiceContent.RootFolder, Principal: "root", RoleId: -1, Propagate: true},
+		{Entity: &c.ServiceContent.RootFolder, Principal: "admin", RoleId: -1, Propagate: true},
+	}
+	if !reflect.DeepEqual(permissions, want) {
+		t.Errorf("permissions without accounts = %+v, want only simulator defaults %+v", permissions, want)
+	}
+}
+
+func TestPermissionStagingSets(t *testing.T) {
+	sc, err := scenario.Parse([]byte(`failureDomains:
+- name: east
+  datacenter: east-dc
+- name: west
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    on: ["*"]
+    extra: [Global.LogEvent, Authorization.ModifyRoles]
+    missing: [Cns.Searchable, Authorization.ModifyRoles]
+  - role: openshift-installer
+- name: other
+  grants:
+  - role: openshift-installer
+    on: [east, west]
+    extra: [Authorization.ModifyRoles, Global.LogEvent, Global.LogEvent]
+    missing: [Authorization.ModifyRoles, Cns.Searchable]
+  - role: openshift-installer
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	c := loopbackClient(t, s)
+	ctx := context.Background()
+	auth := object.NewAuthorizationManager(c.Client)
+	roles, err := auth.RoleList(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stagedRoles int
+	for _, role := range roles {
+		if !role.System {
+			stagedRoles++
+		}
+	}
+	if stagedRoles != 2 {
+		t.Errorf("created %d roles, want 2 distinct privilege sets", stagedRoles)
+	}
+	entities := []types.ManagedObjectReference{c.ServiceContent.RootFolder}
+	for _, fd := range sc.FailureDomains {
+		dc, err := find.NewFinder(c.Client).Datacenter(ctx, fd.Datacenter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entities = append(entities, dc.Reference())
+		folders, err := dc.Folders(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{folders.VmFolder.Reference()}, "installer")
+		if err != nil || len(results) != 1 {
+			t.Fatalf("child privileges = %+v, err = %v", results, err)
+		}
+		if !slices.Contains(results[0].Privileges, "VirtualMachine.Inventory.Create") || slices.Contains(results[0].Privileges, "Cns.Searchable") {
+			t.Errorf("child privileges do not inherit only the FD role: %v", results[0].Privileges)
+		}
+	}
+	for i, entity := range entities {
+		permissions, err := auth.RetrieveEntityPermissions(ctx, entity, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var staged []types.Permission
+		for _, permission := range permissions {
+			if permission.Principal == "installer" || permission.Principal == "other" {
+				staged = append(staged, permission)
+				role := roles.ById(permission.RoleId)
+				if role == nil {
+					t.Fatalf("missing role %d", permission.RoleId)
+				}
+				if permission.Group || permission.Propagate != (i != 0) {
+					t.Errorf("incorrect permission scope: %+v", permission)
+				}
+				for privilege, want := range map[string]bool{
+					"Cns.Searchable": i == 0, "VirtualMachine.Inventory.Create": i != 0,
+					"Global.LogEvent": true, "Authorization.ModifyRoles": false,
+				} {
+					if slices.Contains(role.Privilege, privilege) != want {
+						t.Errorf("entity %s role %s contains %s, want %t", entity, role.Name, privilege, want)
+					}
+				}
+			}
+		}
+		if len(staged) != 2 {
+			t.Errorf("entity %s has %d staged permissions, want 2", entity, len(staged))
+		} else if staged[0].RoleId != staged[1].RoleId {
+			t.Errorf("identical privilege sets did not reuse a role: %+v", staged)
+		}
+	}
 }
 
 func TestStagedTopology(t *testing.T) {
