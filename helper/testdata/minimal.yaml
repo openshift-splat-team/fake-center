@@ -1,0 +1,10 @@
+# Copyright 2026 The fake-center Authors.
+# SPDX-License-Identifier: Apache-2.0
+
+failureDomains:
+- name: fd1
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    on: [fd1]
