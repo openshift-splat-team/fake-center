@@ -5,6 +5,7 @@ package fakecenter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -267,5 +268,68 @@ func TestStartRetriesPublishCollision(t *testing.T) {
 	}
 	if len(published) != 2 || published[0] == published[1] {
 		t.Fatalf("expected exactly one retry with a different IP, got %v", published)
+	}
+}
+
+func TestStartRetriesImmediatePublishCollision(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		output     string
+		launchErr  error
+		persistent bool
+		wantRuns   int
+		wantError  bool
+	}{
+		{name: "command output", output: "bind: address already in use", launchErr: errors.New("exit status 125"), wantRuns: 2},
+		{name: "command error", launchErr: errors.New("listen tcp: address already in use"), wantRuns: 2},
+		{name: "equivalent bind failure", output: "Bind for 127.0.0.2:443 failed: port is already allocated", launchErr: errors.New("exit status 125"), wantRuns: 2},
+		{name: "port in use", launchErr: errors.New("PORT IS ALREADY IN USE"), wantRuns: 2},
+		{name: "retry bounded", launchErr: errors.New("address already in use"), persistent: true, wantRuns: 2, wantError: true},
+		{name: "unrelated failure", launchErr: errors.New("image pull denied"), wantRuns: 1, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/accounts.json" {
+					fmt.Fprint(w, "[]")
+				}
+			})
+			var published, names, removed []string
+			runtime := runnerFunc(func(_ context.Context, args ...string) (string, error) {
+				switch args[0] {
+				case "run":
+					published = append(published, args[5])
+					names = append(names, args[3])
+					if len(published) == 1 || tc.persistent {
+						return tc.output, tc.launchErr
+					}
+				case "logs":
+					// The runtime rejected publication before creating a container.
+					return "", errors.New("no such container")
+				case "rm":
+					removed = append(removed, args[2])
+				}
+				return "", nil
+			})
+			tb := &recordedTB{TB: t}
+			defer tb.cleanup()
+			v, err := startWithRuntime(tb, "testdata/minimal.yaml", runtime, client)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("startup error = %v, wantError = %v", err, tc.wantError)
+			}
+			if len(published) != tc.wantRuns {
+				t.Fatalf("launches = %d, want %d", len(published), tc.wantRuns)
+			}
+			if len(published) == 2 && published[0] == published[1] {
+				t.Fatalf("retry reused failed publish address %s", published[0])
+			}
+			if !tc.wantError && v == nil {
+				t.Fatal("retry did not return the ready instance")
+			}
+			tb.cleanup()
+			tb.cleanups = nil
+			if !reflect.DeepEqual(removed, names) {
+				t.Fatalf("removed containers = %v, launched = %v", removed, names)
+			}
+		})
 	}
 }

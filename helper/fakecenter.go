@@ -119,7 +119,9 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		}
 		tb.Cleanup(cleanup)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		_, err = runtime.run(ctx, buildRunArgs(ip, name, scenario)...)
+		launchOutput, launchErr := runtime.run(ctx, buildRunArgs(ip, name, scenario)...)
+		launchCollision := launchErr != nil && (isPublishCollision(launchOutput) || isPublishCollision(launchErr.Error()))
+		err = launchErr
 		var v *VCenter
 		if err == nil {
 			v, err = waitForVCenter(ctx, client, "https://"+ip)
@@ -133,7 +135,7 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		timedOut := errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded
 		cancel()
 		logs, logErr := containerLogs(runtime, name)
-		publishCollision := strings.Contains(strings.ToLower(logs), "address already in use")
+		publishCollision := launchCollision || (timedOut && isPublishCollision(logs))
 		const maxTail = 16 * 1024
 		if len(logs) > maxTail {
 			logs = logs[len(logs)-maxTail:]
@@ -142,7 +144,7 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		if logErr != nil {
 			startupErr = fmt.Errorf("%w\nread container logs: %v", startupErr, logErr)
 		}
-		if attempt == 0 && timedOut && publishCollision {
+		if attempt == 0 && publishCollision {
 			// Reserve the next address while the failed one is still held.
 			nextIP, allocErr := allocLoopback()
 			cleanup()
@@ -156,6 +158,13 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		return nil, startupErr
 	}
 	panic("unreachable")
+}
+
+func isPublishCollision(output string) bool {
+	output = strings.ToLower(output)
+	return strings.Contains(output, "address already in use") ||
+		strings.Contains(output, "port is already allocated") ||
+		strings.Contains(output, "port is already in use")
 }
 
 func containerLogs(runtime runner, name string) (string, error) {
