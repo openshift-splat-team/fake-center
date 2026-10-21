@@ -189,11 +189,6 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// Replaced by topology staging in Task 5.
-func (s *Server) stageTopology(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
-	return nil
-}
-
 // Replaced by permission staging in Task 6.
 func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
 	return nil

@@ -10,11 +10,13 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -271,4 +273,175 @@ func createVersionTestHost(t *testing.T, c *govmomi.Client) types.AboutInfo {
 		t.Fatal(err)
 	}
 	return h.Config.Product
+}
+
+func loopbackClient(t *testing.T, s *Server) *govmomi.Client {
+	t.Helper()
+	u, err := url.Parse(s.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := govmomi.NewClient(context.Background(), u, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Logout(context.Background()) })
+	return c
+}
+
+func TestStagedTopology(t *testing.T) {
+	sc, err := scenario.Parse([]byte(`failureDomains:
+- name: east
+  datacenter: east-dc
+  cluster: east-compute
+  vmFolder: workloads
+  networks: [production, storage]
+  datastores: [fast, bulk]
+- name: west
+- name: central
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	c := loopbackClient(t, s)
+	ctx := context.Background()
+	finder := find.NewFinder(c.Client)
+	dcs, err := finder.DatacenterList(ctx, "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, dc := range dcs {
+		names = append(names, dc.Name())
+	}
+	sort.Strings(names)
+	if want := []string{"central", "east-dc", "west"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("datacenters = %v, want %v", names, want)
+	}
+	for _, fd := range sc.FailureDomains {
+		t.Run(fd.Name, func(t *testing.T) {
+			dc, err := finder.Datacenter(ctx, fd.Datacenter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := find.NewFinder(c.Client).SetDatacenter(dc)
+			cluster, err := f.ClusterComputeResource(ctx, fd.Cluster)
+			if err != nil {
+				t.Fatal(err)
+			}
+			folders, err := dc.Folders(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cm mo.ClusterComputeResource
+			if err := cluster.Properties(ctx, cluster.Reference(), []string{"parent"}, &cm); err != nil {
+				t.Fatal(err)
+			}
+			if cm.Parent == nil || *cm.Parent != folders.HostFolder.Reference() {
+				t.Error("cluster is not in the DC host folder")
+			}
+			hosts, err := cluster.Hosts(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var hostNames []string
+			for _, host := range hosts {
+				hostNames = append(hostNames, host.Name())
+			}
+			sort.Strings(hostNames)
+			wantHosts := []string{fd.Name + "-host0", fd.Name + "-host1", fd.Name + "-host2"}
+			if !reflect.DeepEqual(hostNames, wantHosts) {
+				t.Errorf("hosts = %v, want %v", hostNames, wantHosts)
+			}
+			if _, err := f.Folder(ctx, folders.VmFolder.InventoryPath+"/"+fd.VMFolder); err != nil {
+				t.Errorf("VM folder: %v", err)
+			}
+			networks, err := f.NetworkList(ctx, "*")
+			var switches []*object.DistributedVirtualSwitch
+			for _, network := range networks {
+				if dvs, ok := network.(*object.DistributedVirtualSwitch); ok {
+					switches = append(switches, dvs)
+				}
+			}
+			if err != nil || len(switches) != 1 || switches[0].Name() != fd.Name+"-dvs" {
+				t.Fatalf("DVS = %v, err = %v", switches, err)
+			}
+			var dvs mo.DistributedVirtualSwitch
+			if err := switches[0].Properties(ctx, switches[0].Reference(), []string{"portgroup", "config.host"}, &dvs); err != nil {
+				t.Fatal(err)
+			}
+			if len(dvs.Config.GetDVSConfigInfo().Host) != 3 {
+				t.Errorf("DVS has %d hosts, want 3", len(dvs.Config.GetDVSConfigInfo().Host))
+			}
+			for _, name := range fd.Networks {
+				network, err := f.Network(ctx, name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := network.(*object.DistributedVirtualPortgroup); !ok {
+					t.Errorf("network %s is %T, want distributed portgroup", name, network)
+				}
+			}
+			for _, name := range fd.Datastores {
+				ds, err := f.Datastore(ctx, name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var datastore mo.Datastore
+				if err := ds.Properties(ctx, ds.Reference(), []string{"host"}, &datastore); err != nil {
+					t.Fatal(err)
+				}
+				if len(datastore.Host) != 3 {
+					t.Errorf("datastore %s mounted on %d hosts, want 3", name, len(datastore.Host))
+				}
+			}
+		})
+	}
+}
+
+func TestStagedHostVersionsAreInstanceLocal(t *testing.T) {
+	ctx := context.Background()
+	var clients []*govmomi.Client
+	for _, version := range []string{"8.0.2", "9.0.0"} {
+		sc, err := scenario.Parse([]byte(fmt.Sprintf("vcenter:\n  version: %q\nfailureDomains: [{}]\n", version)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		clients = append(clients, loopbackClient(t, s))
+	}
+	// Both instances are live: constructing B must not mutate A's host products.
+	for i, c := range clients {
+		version := []string{"8.0.2", "9.0.0"}[i]
+		f := find.NewFinder(c.Client)
+		dc, err := f.DefaultDatacenter(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hosts, err := f.SetDatacenter(dc).HostSystemList(ctx, "*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hosts) != 3 {
+			t.Fatalf("instance %d has %d hosts, want 3", i, len(hosts))
+		}
+		for _, host := range hosts {
+			var h mo.HostSystem
+			if err := host.Properties(ctx, host.Reference(), []string{"config.product", "summary.config.product"}, &h); err != nil {
+				t.Fatal(err)
+			}
+			if h.Config.Product.Version != version || h.Summary.Config.Product == nil || h.Summary.Config.Product.Version != version {
+				t.Errorf("instance %d host %s: config = %+v, summary = %+v, want %s", i, host.Name(), h.Config.Product, h.Summary.Config.Product, version)
+			}
+		}
+	}
 }
