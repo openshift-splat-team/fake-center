@@ -86,6 +86,13 @@ func (s *Server) stageFailureDomain(ctx context.Context, c *vim25.Client, root *
 		return fmt.Errorf("wait for DVS %s: %w", name, err)
 	}
 	dvs := object.NewDistributedVirtualSwitch(c, info.Result.(types.ManagedObjectReference))
+	// Reconfigure narrows Config to DVSConfigInfo, so retain the uplink reference
+	// from the VMware-specific configuration before attaching the hosts.
+	simDVS := s.model.Map().Get(dvs.Reference()).(*simulator.VmwareDistributedVirtualSwitch)
+	uplinks := simDVS.Config.(*types.VMwareDVSConfigInfo).UplinkPortgroup
+	if len(uplinks) != 1 {
+		return fmt.Errorf("DVS %s has %d uplink portgroups, want 1", name, len(uplinks))
+	}
 	task, err = dvs.Reconfigure(ctx, &types.DVSConfigSpec{Host: members})
 	if err != nil {
 		return fmt.Errorf("attach hosts to DVS %s: %w", name, err)
@@ -105,6 +112,16 @@ func (s *Server) stageFailureDomain(ctx context.Context, c *vim25.Client, root *
 		if err := task.Wait(ctx); err != nil {
 			return fmt.Errorf("wait for portgroup %s: %w", name, err)
 		}
+	}
+	// Per the topology review ruling, a realistic DVS's infrastructure uplink
+	// portgroup is intentional (not scenario-declared), but its name must be
+	// deterministic rather than include the simulator's generated object ID.
+	task, err = object.NewDistributedVirtualPortgroup(c, uplinks[0]).Rename(ctx, name+"-DVUplinks")
+	if err != nil {
+		return fmt.Errorf("rename DVS %s uplink portgroup: %w", name, err)
+	}
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("wait for DVS %s uplink portgroup rename: %w", name, err)
 	}
 	for _, name := range fd.Datastores {
 		dir, err := os.MkdirTemp(home, "datastore-")

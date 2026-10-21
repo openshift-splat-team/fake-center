@@ -363,9 +363,13 @@ func TestStagedTopology(t *testing.T) {
 			}
 			networks, err := f.NetworkList(ctx, "*")
 			var switches []*object.DistributedVirtualSwitch
+			var portgroupNames []string
 			for _, network := range networks {
-				if dvs, ok := network.(*object.DistributedVirtualSwitch); ok {
-					switches = append(switches, dvs)
+				switch network := network.(type) {
+				case *object.DistributedVirtualSwitch:
+					switches = append(switches, network)
+				case *object.DistributedVirtualPortgroup:
+					portgroupNames = append(portgroupNames, network.Name())
 				}
 			}
 			if err != nil || len(switches) != 1 || switches[0].Name() != fd.Name+"-dvs" {
@@ -378,14 +382,11 @@ func TestStagedTopology(t *testing.T) {
 			if len(dvs.Config.GetDVSConfigInfo().Host) != 3 {
 				t.Errorf("DVS has %d hosts, want 3", len(dvs.Config.GetDVSConfigInfo().Host))
 			}
-			for _, name := range fd.Networks {
-				network, err := f.Network(ctx, name)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, ok := network.(*object.DistributedVirtualPortgroup); !ok {
-					t.Errorf("network %s is %T, want distributed portgroup", name, network)
-				}
+			wantPortgroups := append([]string{fd.Name + "-dvs-DVUplinks"}, fd.Networks...)
+			sort.Strings(portgroupNames)
+			sort.Strings(wantPortgroups)
+			if !reflect.DeepEqual(portgroupNames, wantPortgroups) {
+				t.Errorf("portgroups = %v, want %v", portgroupNames, wantPortgroups)
 			}
 			for _, name := range fd.Datastores {
 				ds, err := f.Datastore(ctx, name)
