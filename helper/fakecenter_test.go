@@ -25,6 +25,7 @@ import (
 )
 
 func TestStartNoRuntime(t *testing.T) {
+	t.Setenv("FAKE_CENTER_RUNTIME", "")
 	t.Setenv("PATH", t.TempDir())
 	_, err := Start(t, "testdata/minimal.yaml")
 	if err == nil || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") || !strings.Contains(err.Error(), "install") {
@@ -101,6 +102,7 @@ func TestStartIntegration(t *testing.T) {
 }
 
 func TestDetectRuntime(t *testing.T) {
+	t.Setenv("FAKE_CENTER_RUNTIME", "")
 	for _, podmanWorks := range []bool{true, false} {
 		t.Run(fmt.Sprint(podmanWorks), func(t *testing.T) {
 			dir := t.TempDir()
@@ -132,6 +134,46 @@ func TestDetectRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDetectRuntimeOverride(t *testing.T) {
+	for _, forced := range []string{"podman", "docker"} {
+		for _, available := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/available=%t", forced, available), func(t *testing.T) {
+				dir := t.TempDir()
+				for _, executable := range []string{"podman", "docker"} {
+					if executable == forced && !available {
+						continue
+					}
+					if err := os.WriteFile(filepath.Join(dir, executable), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("PATH", dir)
+				t.Setenv("FAKE_CENTER_RUNTIME", forced)
+				runtime, err := detectRuntime()
+				if !available {
+					if err == nil || !strings.Contains(err.Error(), "FAKE_CENTER_RUNTIME") || !strings.Contains(err.Error(), forced) {
+						t.Fatalf("expected clear forced-runtime error without fallback, got runtime=%v, err=%v", runtime, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := runtime.(commandRunner).executable; got != forced {
+					t.Fatalf("selected runtime = %q, want %q", got, forced)
+				}
+			})
+		}
+	}
+	t.Run("invalid", func(t *testing.T) {
+		t.Setenv("FAKE_CENTER_RUNTIME", "other")
+		_, err := detectRuntime()
+		if err == nil || !strings.Contains(err.Error(), "FAKE_CENTER_RUNTIME") || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") {
+			t.Fatalf("expected supported-runtime validation error, got %v", err)
+		}
+	})
 }
 
 func TestLoopbackAllocation(t *testing.T) {

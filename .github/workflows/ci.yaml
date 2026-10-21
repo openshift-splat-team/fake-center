@@ -1,0 +1,100 @@
+# Test fake-center and publish verified images to Quay.io.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Test root module
+        run: go test ./...
+
+      - name: Test helper module
+        working-directory: helper
+        run: go test ./...
+
+  integration:
+    name: Container integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FAKE_CENTER_IMAGE: fake-center:test
+      FAKE_CENTER_RUNTIME: docker
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Build test image
+        run: docker build -t fake-center:test .
+
+      - name: Test root module with image
+        run: go test ./... -v
+
+      - name: Test helper module with image
+        working-directory: helper
+        run: go test ./... -v
+
+  publish:
+    name: Publish fake-center to Quay.io
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Log in to Quay.io
+        env:
+          QUAY_USERNAME: ocp-splat+splat_team_push
+          QUAY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: printf '%s' "$QUAY_PASSWORD" | docker login quay.io --username "$QUAY_USERNAME" --password-stdin
+
+      - name: Build and push image
+        env:
+          IMAGE: quay.io/ocp-splat/fake-center
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tags=("sha-${GITHUB_SHA:0:12}")
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tags+=("$GITHUB_REF_NAME" "latest")
+          elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            tags+=("latest")
+          fi
+
+          build_args=()
+          for tag in "${tags[@]}"; do
+            build_args+=(--tag "$IMAGE:$tag")
+          done
+
+          docker build "${build_args[@]}" .
+          for tag in "${tags[@]}"; do
+            docker push "$IMAGE:$tag"
+          done

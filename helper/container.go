@@ -32,13 +32,24 @@ func (r commandRunner) run(ctx context.Context, args ...string) (string, error) 
 }
 
 func detectRuntime() (runner, error) {
-	for _, executable := range []string{"podman", "docker"} {
+	forced := os.Getenv("FAKE_CENTER_RUNTIME")
+	executables := []string{"podman", "docker"}
+	if forced != "" {
+		if forced != "podman" && forced != "docker" {
+			return nil, fmt.Errorf("invalid FAKE_CENTER_RUNTIME %q: must be podman or docker", forced)
+		}
+		executables = []string{forced}
+	}
+	for _, executable := range executables {
 		r := commandRunner{executable: executable}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err := r.run(ctx, "--version")
 		cancel()
 		if err == nil {
 			return r, nil
+		}
+		if forced != "" {
+			return nil, fmt.Errorf("FAKE_CENTER_RUNTIME=%s is unavailable; install %s and ensure it is on PATH: %w", forced, forced, err)
 		}
 	}
 	return nil, errors.New("no container runtime available; install podman or docker and ensure it is on PATH")
