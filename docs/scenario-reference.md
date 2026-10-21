@@ -20,22 +20,38 @@ lists also receive defaults.
 | `vcenter.hostBuild` | string | Release-mapped ESXi build (`"22380479"` for the default); optional override. |
 | `failureDomains` | list of objects | No default; at least one entry is required. |
 | `failureDomains[].name` | string | `fd<N>` where N is the 1-based list position; must be unique. |
-| `failureDomains[].datacenter` | string | The failure-domain name. |
+| `failureDomains[].datacenter` | string | The failure-domain name; must be distinct across domains in v1. |
 | `failureDomains[].cluster` | string | `<name>-cluster`. |
 | `failureDomains[].vmFolder` | string | `<name>-vms`. |
 | `failureDomains[].networks` | list of strings | `[<name>-network]`; network names to stage. |
 | `failureDomains[].datastores` | list of strings | `[<name>-datastore]`; datastore names to stage. |
 | `accounts` | list of objects | Empty list; no scenario accounts. |
-| `accounts[].name` | string | No generated default; supply a login principal name. Names must be unique. |
+| `accounts[].name` | string | No generated default; supply a nonempty, unique login principal name. Simulator-reserved names (`root`) are rejected. |
 | `accounts[].grants` | list of objects | Empty list; no role grants. |
 | `accounts[].grants[].role` | string | No default; each grant must specify `openshift-installer`, the only v1 role. |
-| `accounts[].grants[].missing` | list of strings | Empty list; privilege IDs to subtract from the role. |
+| `accounts[].grants[].missing` | list of strings | Empty list; privilege IDs to subtract from the role. `System.*` IDs cannot be gapped. |
 | `accounts[].grants[].extra` | list of strings | Empty list; privilege IDs to add to the role. |
 | `accounts[].grants[].on` | list of strings | Empty list (no failure-domain targets); use failure-domain **names** or `["*"]` for all domains. |
 
 Each account's password is `fake-center`; there is no password schema field.
 The helper's `Account(name)` returns the credentials. These are test credentials,
 not an access-control boundary: do not expose this service publicly.
+
+**v1 topology limitation:** each failure domain requires a distinct datacenter
+in v1. Sharing a datacenter across failure domains is rejected; shared-datacenter
+topologies are deferred to v2.
+
+Grant targets must be disjoint **per account**: a failure-domain name may appear
+in at most one grant, and `"*"` conflicts with every explicit failure-domain
+target (and another wildcard grant). For example, `[fd1, fd3]` plus `[fd2]` is
+valid; `["*"]` plus `[fd1]` is rejected. Different accounts may target the same
+domain. Grants are not unioned or applied as deny rules.
+
+The simulator's role baseline always includes `System.*` privileges, so any
+`missing` entry starting with `System.` (for example `System.Read`) is rejected:
+these privileges cannot be gapped. `extra` entries with that prefix remain
+allowed. The `root` account name is reserved because the simulator's built-in
+administrator would bypass deliberate privilege gaps; choose another name.
 
 Known version mappings live in [`internal/release/release.go`](../internal/release/release.go).
 An unknown product version is accepted only when **all three** `apiVersion`,
@@ -73,8 +89,8 @@ not `VirtualMachine.Inventory.Create` on `fd2`.
 
 Start from the supported role, subtract the precise privilege under test with
 `missing`, and target only the affected domains. Keep full-role and reduced-role
-targets disjoint as above; do not grant a full role on `"*"` and expect a later
-grant to act as a deny rule. `missing` changes that grant's role, not every grant
+targets disjoint as above; validation rejects a full role on `"*"` combined with
+another targeted grant. `missing` changes that grant's role, not every grant
 for the user. If an ID appears in both `extra` and `missing`, subtraction wins.
 
 The role is divided into vCenter-root and failure-domain privilege groups, not

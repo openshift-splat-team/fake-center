@@ -68,6 +68,43 @@ component's validation result (including the affected failure domain), not just
 the simulator's response. The worked example demonstrates the underlying
 privilege query; it is not a full installer preflight invocation.
 
+### Testing your component's validation logic
+
+The harness proves the **vCenter-side truth** (for example, `fd2` lacks
+`VirtualMachine.Inventory.Create`). A test in the **consumer repository** proves
+that its real validation consumes that truth correctly. Keep installer/component
+imports there, not in fake-center. The following sketch uses the same trusted
+client wiring as [`examples/installer_privileges_test.go`](../examples/installer_privileges_test.go);
+replace `validation.ValidateVCenter` and its error sentinel with your component's
+actual entry point and expected error. Standard-library and govmomi imports are
+as in that example, plus your own validation package and `errors`/`strings`.
+
+```go
+func TestValidationReportsFD2PrivilegeGap(t *testing.T) {
+    v, err := fakecenter.Start(t, "testdata/insufficient-privs.yaml")
+    if err != nil { t.Fatal(err) }
+    account, ok := v.Account("installer")
+    if !ok { t.Fatal("installer account missing") }
+    caPath := filepath.Join(t.TempDir(), "ca.pem")
+    if err := os.WriteFile(caPath, v.CABundle, 0600); err != nil { t.Fatal(err) }
+    u, err := url.Parse(v.Server)
+    if err != nil { t.Fatal(err) }
+    u.Path = "/sdk"
+    transport := soap.NewClient(u, false)
+    t.Cleanup(transport.CloseIdleConnections)
+    if err := transport.SetRootCAs(caPath); err != nil { t.Fatal(err) }
+    client, err := vim25.NewClient(t.Context(), transport)
+    if err != nil { t.Fatal(err) }
+    sessionMgr := session.NewManager(client)
+    if err := sessionMgr.Login(t.Context(), url.UserPassword(account.Username, account.Password)); err != nil { t.Fatal(err) }
+    defer func() { if err := sessionMgr.Logout(t.Context()); err != nil { t.Error(err) } }()
+    err = validation.ValidateVCenter(t.Context(), client)
+    if !errors.Is(err, validation.ErrInsufficientPrivileges) || !strings.Contains(err.Error(), "fd2") {
+        t.Fatalf("expected fd2 privilege misconfiguration, got %v", err)
+    }
+}
+```
+
 ## Port modes and fidelity
 
 The server always listens on **443 inside the container**. The helper has two
@@ -77,7 +114,7 @@ host-facing modes:
    `Server` is `https://<addr>` with **no port**. This works with rootful Docker,
    Prow nested-podman, and rootless Linux hosts where
    `net.ipv4.ip_unprivileged_port_start` is at most 443.
-2. **Fallback: ephemeral high port.** On a rootless publish-permission failure,
+2. **Fallback: ephemeral high port.** On a publish-permission or address-assignment failure,
    it publishes a high port, includes that port in `Server`, and logs a warning
    about degraded 443 fidelity. This is convenient for local functional tests,
    but component port-handling bugs are exercised **only in strict mode**. Run
@@ -95,6 +132,24 @@ follow your host security policy. The setting may reset after reboot. Rerun the
 test and check that no fallback warning appears. The shipped helper uses port
 publishing, **not** the early design's direct-container-IP fallback; do not rely
 on container IP reachability (particularly across a container VM).
+
+On macOS, strict mode requires an alias on `lo0` for **each** loopback address
+used (the helper starts with `127.0.0.2`; parallel instances use subsequent
+addresses):
+
+```sh
+sudo ifconfig lo0 alias 127.0.0.2 up
+```
+
+Repeat with `127.0.0.3`, etc., as needed, or rely on the high-port fallback when
+the runtime reports `can't assign requested address`. This fallback still needs
+the runtime to support publication on the selected address. Both modes are
+**not yet verified on macOS**; the Linux `sysctl` command above does not apply.
+
+This repository's helper integration test enforces no-port-suffix publication
+when `FAKE_CENTER_STRICT=1` is set, as in CI; it fails rather than accepting a
+fallback result. Without that setting, the test accepts either mode. This is a
+test assertion, not a switch that disables fallback in `Start`.
 
 ## Debug locally
 

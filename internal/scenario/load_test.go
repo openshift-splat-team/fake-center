@@ -4,6 +4,7 @@
 package scenario
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -202,5 +203,99 @@ func TestValidate(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestValidateGrantTargets(t *testing.T) {
+	tests := []struct {
+		name   string
+		grants string
+		want   []string
+	}{
+		{name: "disjoint proof point", grants: "[{role: openshift-installer, on: [fd1, fd3]}, {role: openshift-installer, on: [fd2]}]"},
+		{name: "single wildcard", grants: "[{role: openshift-installer, on: ['*']}]"},
+		{name: "repeated domain within one grant", grants: "[{role: openshift-installer, on: [fd1, fd1]}]"},
+		{name: "wildcard then explicit", grants: "[{role: openshift-installer, on: ['*']}, {role: openshift-installer, on: [fd1]}]", want: []string{"installer", "fd1", "overlapping"}},
+		{name: "explicit then wildcard", grants: "[{role: openshift-installer, on: [fd1]}, {role: openshift-installer, on: ['*']}]", want: []string{"installer", "*", "overlapping"}},
+		{name: "duplicate domain", grants: "[{role: openshift-installer, on: [fd2]}, {role: openshift-installer, on: [fd2]}]", want: []string{"installer", "fd2", "overlapping"}},
+		{name: "duplicate wildcard", grants: "[{role: openshift-installer, on: ['*']}, {role: openshift-installer, on: ['*']}]", want: []string{"installer", "*", "overlapping"}},
+		{name: "wildcard mixed with explicit", grants: "[{role: openshift-installer, on: ['*', fd1]}]", want: []string{"installer", "fd1", "overlapping"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Parse([]byte("failureDomains: [{name: fd1}, {name: fd2}, {name: fd3}]\naccounts: [{name: installer, grants: " + test.grants + "}]"))
+			assertValidationError(t, err, test.want)
+		})
+	}
+	t.Run("different accounts may share targets", func(t *testing.T) {
+		_, err := Parse([]byte("failureDomains: [{}]\naccounts: [{name: a, grants: [{role: openshift-installer, on: [fd1]}]}, {name: b, grants: [{role: openshift-installer, on: [fd1]}]}]"))
+		assertValidationError(t, err, nil)
+	})
+}
+
+func TestValidateAccountNames(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want []string
+	}{
+		{name: "root", want: []string{`account "root"`, "reserved", "choose"}},
+		{name: "", want: []string{`account name ""`, "must not be empty"}},
+		{name: "installer"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Parse([]byte(fmt.Sprintf("failureDomains: [{}]\naccounts: [{name: %q}]", test.name)))
+			assertValidationError(t, err, test.want)
+		})
+	}
+}
+
+func TestValidateSystemPrivilegeGaps(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		field string
+		id    string
+		want  []string
+	}{
+		{name: "baseline read", field: "missing", id: "System.Read", want: []string{"installer", "System.Read", "simulator's role baseline always includes System.* privileges", "cannot be gapped"}},
+		{name: "baseline prefix", field: "missing", id: "System.Custom", want: []string{"System.Custom", "cannot be gapped"}},
+		{name: "inventory gap", field: "missing", id: "VirtualMachine.Inventory.Create"},
+		{name: "baseline extra allowed", field: "extra", id: "System.Read"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Parse([]byte(fmt.Sprintf("failureDomains: [{}]\naccounts: [{name: installer, grants: [{role: openshift-installer, on: [fd1], %s: [%s]}]}]", test.field, test.id)))
+			assertValidationError(t, err, test.want)
+		})
+	}
+}
+
+func TestValidateDistinctDatacenters(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		fds  string
+		want []string
+	}{
+		{name: "distinct", fds: "[{name: fd1, datacenter: dc1}, {name: fd2, datacenter: dc2}]"},
+		{name: "shared", fds: "[{name: fd1, datacenter: dc}, {name: fd2, datacenter: dc}]", want: []string{"dc", "fd1", "fd2", "each failure domain requires a distinct datacenter in v1"}},
+		{name: "default collision", fds: "[{name: fd1, datacenter: fd2}, {name: fd2}]", want: []string{"fd2", "each failure domain requires a distinct datacenter in v1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Parse([]byte("failureDomains: " + test.fds))
+			assertValidationError(t, err, test.want)
+		})
+	}
+}
+
+func assertValidationError(t *testing.T, err error, want []string) {
+	t.Helper()
+	if len(want) == 0 {
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	for _, fragment := range want {
+		if err == nil || !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("validation error = %v, want error containing %q", err, fragment)
+		}
 	}
 }

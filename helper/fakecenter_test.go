@@ -64,6 +64,9 @@ func TestStartIntegration(t *testing.T) {
 	if u.Scheme != "https" || !regexp.MustCompile(`^127\.0\.0\.\d+$`).MatchString(u.Hostname()) {
 		t.Fatalf("Server must be an HTTPS loopback URL: %s", v.Server)
 	}
+	if err := strictPublicationError(u); err != nil {
+		t.Fatal(err)
+	}
 	if tb.fallback {
 		port, err := strconv.Atoi(u.Port())
 		if err != nil || port < 1024 || port > 65535 {
@@ -98,6 +101,44 @@ func TestStartIntegration(t *testing.T) {
 	defer conn.Close()
 	if len(conn.ConnectionState().VerifiedChains) == 0 {
 		t.Fatal("TLS connection has no verified certificate chain")
+	}
+}
+
+func strictPublicationError(u *url.URL) error {
+	if os.Getenv("FAKE_CENTER_STRICT") == "1" && u.Port() != "" {
+		return fmt.Errorf("FAKE_CENTER_STRICT=1 requires strict port-443 publication without a port suffix; Server = %s", u)
+	}
+	return nil
+}
+
+func TestStrictPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		strict  string
+		server  string
+		wantErr bool
+	}{
+		{name: "default primary", server: "https://127.0.0.2"},
+		{name: "default fallback", server: "https://127.0.0.2:49152"},
+		{name: "strict primary", strict: "1", server: "https://127.0.0.2"},
+		{name: "strict fallback rejected", strict: "1", server: "https://127.0.0.2:49152", wantErr: true},
+		{name: "strict explicit 443 rejected", strict: "1", server: "https://127.0.0.2:443", wantErr: true},
+		{name: "only one enables strict", strict: "0", server: "https://127.0.0.2:49152"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAKE_CENTER_STRICT", tc.strict)
+			u, err := url.Parse(tc.server)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = strictPublicationError(u)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("strict publication error = %v, want error %t", err, tc.wantErr)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "FAKE_CENTER_STRICT=1") || !strings.Contains(err.Error(), tc.server)) {
+				t.Fatalf("strict failure must identify the setting and Server: %v", err)
+			}
+		})
 	}
 }
 
@@ -462,6 +503,8 @@ func TestStartFallsBackOnPublishPermission(t *testing.T) {
 		{name: "command error", launchErr: errors.New("listen tcp 127.0.0.2:443: bind: permission denied")},
 		{name: "operation not permitted", launchErr: errors.New("bind: operation not permitted")},
 		{name: "rootlessport", output: "rootlessport cannot expose privileged port 443", launchErr: errors.New("exit status 125")},
+		{name: "macOS address assignment output", output: "listen tcp 127.0.0.2:443: bind: can't assign requested address", launchErr: errors.New("exit status 125")},
+		{name: "macOS address assignment case variant", launchErr: errors.New("bind: Can't Assign Requested Address")},
 		{name: "fallback bounded", launchErr: errors.New("bind: permission denied"), persistent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

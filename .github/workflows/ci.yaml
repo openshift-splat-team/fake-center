@@ -40,6 +40,7 @@ jobs:
     env:
       FAKE_CENTER_IMAGE: fake-center:test
       FAKE_CENTER_RUNTIME: docker
+      FAKE_CENTER_STRICT: "1"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -84,7 +85,7 @@ jobs:
 
           tags=("sha-${GITHUB_SHA:0:12}")
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            tags+=("$GITHUB_REF_NAME" "latest")
+            tags+=("$GITHUB_REF_NAME")
           elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             tags+=("latest")
           fi

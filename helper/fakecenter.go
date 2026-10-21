@@ -183,6 +183,7 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 func isPublishPermission(output string) bool {
 	output = strings.ToLower(output)
 	permission := strings.Contains(output, "permission denied") ||
+		strings.Contains(output, "can't assign requested address") ||
 		strings.Contains(output, "operation not permitted") ||
 		strings.Contains(output, "cannot expose privileged port")
 	bind := strings.Contains(output, "bind") || strings.Contains(output, "listen") ||
