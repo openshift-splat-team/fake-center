@@ -8,7 +8,7 @@ package privsets
 var VCenterGroups = []string{"vcenter"}
 
 // FDGroups are the privilege groups staged on each failure-domain datacenter.
-var FDGroups = []string{"cluster", "portgroup", "folder", "datacenter", "datastore", "resourcepool"}
+var FDGroups = []string{"datacenter", "cluster", "portgroup", "folder", "datastore", "resourcepool"}
 
 var roles = map[string]map[string][]string{
 	"openshift-installer": {

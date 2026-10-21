@@ -9,6 +9,13 @@ import (
 )
 
 func TestInstallerGroups(t *testing.T) {
+	if !slices.Equal(VCenterGroups, []string{"vcenter"}) {
+		t.Errorf("VCenterGroups = %v, want [vcenter]", VCenterGroups)
+	}
+	if !slices.Equal(FDGroups, []string{"datacenter", "cluster", "portgroup", "folder", "datastore", "resourcepool"}) {
+		t.Errorf("FDGroups = %v, want [datacenter cluster portgroup folder datastore resourcepool]", FDGroups)
+	}
+
 	groups, ok := Groups("openshift-installer")
 	if !ok {
 		t.Fatal("Groups(\"openshift-installer\") returned false")
