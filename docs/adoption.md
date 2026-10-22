@@ -68,6 +68,14 @@ component's validation result (including the affected failure domain), not just
 the simulator's response. The worked example demonstrates the underlying
 privilege query; it is not a full installer preflight invocation.
 
+Beyond that explicit wiring, `Start` installs the instance CA into process
+trust: it seeds a combined bundle from the current `SSL_CERT_FILE` (or the
+system bundle) plus the instance CA and points `SSL_CERT_FILE` at it.
+Components and subprocesses that use Go's default TLS trust — for example an
+`openshift-install` binary the test executes — then trust the instance with no
+code changes. Trust is only added, never replaced; the bundle intentionally
+outlives the instance because Go caches system roots after first use.
+
 ### Testing your component's validation logic
 
 The harness proves the **vCenter-side truth** (for example, `fd2` lacks

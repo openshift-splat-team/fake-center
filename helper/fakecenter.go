@@ -148,6 +148,10 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		}
 		if err == nil {
 			cancel()
+			if trustErr := trustInstanceCA(v.CABundle); trustErr != nil {
+				cleanup()
+				return nil, fmt.Errorf("install instance CA into process trust: %w", trustErr)
+			}
 			return v, nil
 		}
 		// exec errors need not wrap the context error when the deadline kills
