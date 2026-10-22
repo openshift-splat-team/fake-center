@@ -12,6 +12,9 @@
 *.out
 coverage.out
 
+# Local openshift-install test scratch (see install-test/README.md)
+install-test/
+
 # Dependency directories (if using vendoring)
 vendor/
 
