@@ -31,6 +31,7 @@ lists also receive defaults.
 | `accounts[].grants[].role` | string | No default; each grant must specify `openshift-installer`, the only v1 role. |
 | `accounts[].grants[].missing` | list of strings | Empty list; privilege IDs to subtract from the role. `System.*` IDs cannot be gapped. |
 | `accounts[].grants[].extra` | list of strings | Empty list; privilege IDs to add to the role. |
+| `accounts[].grants[].without` | list of strings | Empty list; privilege group names whose staging is skipped for this grant (`vcenter`, `datacenter`, `cluster`, `portgroup`, `folder`, `datastore`, `resourcepool`). |
 | `accounts[].grants[].on` | list of strings | Empty list (no failure-domain targets); use failure-domain **names** or `["*"]` for all domains. |
 
 Each account's password is `fake-center`; there is no password schema field.
@@ -94,8 +95,18 @@ another targeted grant. `missing` changes that grant's role, not every grant
 for the user. If an ID appears in both `extra` and `missing`, subtraction wins.
 
 The role is divided into vCenter-root and failure-domain privilege groups, not
-an administrator role. Root grants do not propagate; domain grants propagate
-through their staged inventory. `on` selects domains, not arbitrary entity
+an administrator role. Each group is staged as its own role on the object that
+group is scoped to, mirroring the per-object permission layout the installer
+documents for administrators: the `vcenter` group on the root folder, the
+`datacenter` group on each failure domain's datacenter, the `cluster` group on
+its cluster, the `portgroup` group on each network, the `folder` group on the
+VM folder, the `datastore` group on each datastore, and the `resourcepool`
+group on the cluster's root resource pool. Permissions do not propagate;
+consumers check privileges on the staged objects themselves. `missing`
+subtracts from every group the grant stages, `extra` adds to every group, and
+`without` skips a group's staging for that grant entirely. The root set is a
+union across an account's grants; `without: [vcenter]` on every grant skips
+the root permission. `on` selects domains, not arbitrary entity
 paths. See the [role definition](../internal/privsets/installer.go) for the
 privilege groups. Use real vSphere privilege IDs; `extra` is for augmenting a
 role, not for declaring a new named role.

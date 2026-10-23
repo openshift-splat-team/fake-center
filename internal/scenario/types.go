@@ -35,5 +35,6 @@ type Grant struct {
 	Role    string   `yaml:"role"`    // v1: "openshift-installer".
 	Missing []string `yaml:"missing"` // Privileges to subtract.
 	Extra   []string `yaml:"extra"`   // Privileges to add.
+	Without []string `yaml:"without"` // Privilege groups not staged for this grant.
 	On      []string `yaml:"on"`      // FD names or ["*"].
 }
