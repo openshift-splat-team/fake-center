@@ -92,7 +92,13 @@ func TestInstallerPrivileges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			entity := dc.Reference()
+			folders, err := dc.Folders(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// VirtualMachine.Inventory.Create is a folder-group privilege, staged
+			// on the failure domain's VM folder.
+			entity := folders.VmFolder.Reference()
 			results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{entity}, account.Username)
 			if err != nil {
 				t.Fatal(err)
