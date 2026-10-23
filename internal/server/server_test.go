@@ -20,9 +20,11 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/openshift-splat-team/fake-center/internal/privsets"
 	"github.com/openshift-splat-team/fake-center/internal/scenario"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
@@ -346,7 +348,11 @@ func TestPrivilegeGap(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				entity = dc.Reference()
+				folders, err := dc.Folders(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entity = folders.VmFolder.Reference()
 			}
 			results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{entity}, "installer")
 			if err != nil {
@@ -389,7 +395,91 @@ func TestNoAccountsScenario(t *testing.T) {
 }
 
 func TestPermissionStagingSets(t *testing.T) {
-	sc, err := scenario.Parse([]byte(`failureDomains:
+	t.Run("exact group sets", func(t *testing.T) {
+		sc, err := scenario.Parse([]byte(`failureDomains:
+- name: fd1
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    on: [fd1]
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		c := loopbackClient(t, s)
+		ctx := context.Background()
+		finder := find.NewFinder(c.Client)
+		auth := object.NewAuthorizationManager(c.Client)
+		roles, err := auth.RoleList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The simulator appends the ReadOnly system baseline to every created role.
+		baseline := object.AuthorizationRoleList(roles).ByName("ReadOnly").Privilege
+		roleGroups, ok := privsets.Groups("openshift-installer")
+		if !ok {
+			t.Fatal("openshift-installer role missing")
+		}
+		dc, err := finder.Datacenter(ctx, "fd1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		folders, err := dc.Folders(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cluster, err := finder.ClusterComputeResource(ctx, "/fd1/host/fd1-cluster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rp, err := cluster.ResourcePool(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		network, err := finder.Network(ctx, "/fd1/network/fd1-network")
+		if err != nil {
+			t.Fatal(err)
+		}
+		datastore, err := finder.Datastore(ctx, "/fd1/datastore/fd1-datastore")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			group  string
+			entity types.ManagedObjectReference
+		}{
+			{"datacenter", dc.Reference()},
+			{"cluster", cluster.Reference()},
+			{"resourcepool", rp.Reference()},
+			{"portgroup", network.Reference()},
+			{"folder", folders.VmFolder.Reference()},
+			{"datastore", datastore.Reference()},
+			{"vcenter", c.Client.ServiceContent.RootFolder},
+		} {
+			t.Run(tc.group, func(t *testing.T) {
+				results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{tc.entity}, "installer")
+				if err != nil || len(results) != 1 {
+					t.Fatalf("privileges = %+v, err = %v", results, err)
+				}
+				got := append([]string(nil), results[0].Privileges...)
+				sort.Strings(got)
+				want := append(append([]string(nil), roleGroups[tc.group]...), baseline...)
+				sort.Strings(want)
+				if !slices.Equal(got, want) {
+					t.Errorf("%s privileges = %v, want exactly the %s group plus the system baseline %v", tc.group, got, tc.group, want)
+				}
+			})
+		}
+	})
+
+	t.Run("extra missing and role reuse", func(t *testing.T) {
+		sc, err := scenario.Parse([]byte(`failureDomains:
 - name: east
   datacenter: east-dc
 - name: west
@@ -409,6 +499,131 @@ accounts:
     missing: [Authorization.ModifyRoles, Cns.Searchable]
   - role: openshift-installer
 `))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := New(sc, Options{ListenAddr: "127.0.0.1:0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		c := loopbackClient(t, s)
+		ctx := context.Background()
+		finder := find.NewFinder(c.Client)
+		auth := object.NewAuthorizationManager(c.Client)
+		roles, err := auth.RoleList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stagedRoles int
+		for _, role := range roles {
+			if !role.System {
+				stagedRoles++
+			}
+		}
+		// Every grant in this scenario applies the same extra/missing, so the
+		// expected distinct roles are the distinct per-group sets plus the root
+		// set. The cluster and resourcepool groups share the same privileges
+		// and therefore collapse into one role.
+		roleGroups, ok := privsets.Groups("openshift-installer")
+		if !ok {
+			t.Fatal("openshift-installer role missing")
+		}
+		grant := scenario.Grant{Extra: []string{"Global.LogEvent"}, Missing: []string{"Cns.Searchable", "Authorization.ModifyRoles"}}
+		distinct := map[string]bool{}
+		for _, group := range privsets.FDGroups {
+			set := grantPrivileges(roleGroups, []string{group}, grant)
+			ids := make([]string, 0, len(set))
+			for id := range set {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			distinct[strings.Join(ids, "\x00")] = true
+		}
+		if stagedRoles != len(distinct)+1 {
+			t.Errorf("created %d roles, want %d distinct privilege sets", stagedRoles, len(distinct)+1)
+		}
+		cluster, err := finder.ClusterComputeResource(ctx, "/east-dc/host/east-cluster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		permissions, err := auth.RetrieveEntityPermissions(ctx, cluster.Reference(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var staged []types.Permission
+		for _, permission := range permissions {
+			if permission.Principal == "installer" || permission.Principal == "other" {
+				staged = append(staged, permission)
+			}
+		}
+		if len(staged) != 2 {
+			t.Fatalf("cluster has %d staged permissions, want 2: %+v", len(staged), permissions)
+		}
+		if staged[0].RoleId != staged[1].RoleId {
+			t.Errorf("identical privilege sets did not reuse a role: %+v", staged)
+		}
+		if staged[0].Group || staged[0].Propagate {
+			t.Errorf("incorrect FD permission scope: %+v", staged[0])
+		}
+		role := roles.ById(staged[0].RoleId)
+		if role == nil {
+			t.Fatalf("missing role %d", staged[0].RoleId)
+		}
+		for privilege, want := range map[string]bool{
+			"Resource.AssignVMToPool":   true,
+			"Global.LogEvent":           true,
+			"Network.Assign":            false, // portgroup privilege must not leak into the cluster role
+			"Authorization.ModifyRoles": false, // missing wins over extra
+		} {
+			if slices.Contains(role.Privilege, privilege) != want {
+				t.Errorf("cluster role contains %s = %t, want %t", privilege, !want, want)
+			}
+		}
+		rootPermissions, err := auth.RetrieveEntityPermissions(ctx, c.Client.ServiceContent.RootFolder, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, permission := range rootPermissions {
+			if permission.Principal != "installer" {
+				continue
+			}
+			if permission.Propagate {
+				t.Errorf("root permission must not propagate: %+v", permission)
+			}
+			role := roles.ById(permission.RoleId)
+			if role == nil {
+				t.Fatalf("missing role %d", permission.RoleId)
+			}
+			if !slices.Contains(role.Privilege, "Global.LogEvent") || !slices.Contains(role.Privilege, "Cns.Searchable") || slices.Contains(role.Privilege, "Authorization.ModifyRoles") {
+				// The root set is a union across grants: the plain second grant
+				// re-adds Cns.Searchable that the first grant's missing removed.
+				t.Errorf("root role extra/missing not applied: %v", role.Privilege)
+			}
+		}
+	})
+}
+
+func TestWithoutGroup(t *testing.T) {
+	sc, err := scenario.Parse([]byte(`failureDomains:
+- name: fd1
+- name: fd2
+accounts:
+- name: gapless
+  grants:
+  - role: openshift-installer
+    on: [fd1]
+- name: nocluster
+  grants:
+  - role: openshift-installer
+    without: [cluster]
+    on: [fd2]
+- name: noroot
+  grants:
+  - role: openshift-installer
+    without: [vcenter]
+    on: [fd2]
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,70 +634,66 @@ accounts:
 	t.Cleanup(func() { _ = s.Close() })
 	c := loopbackClient(t, s)
 	ctx := context.Background()
+	finder := find.NewFinder(c.Client)
 	auth := object.NewAuthorizationManager(c.Client)
+
+	cluster, err := finder.ClusterComputeResource(ctx, "/fd2/host/fd2-cluster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	permissions, err := auth.RetrieveEntityPermissions(ctx, cluster.Reference(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range permissions {
+		if permission.Principal == "nocluster" {
+			t.Errorf("without: [cluster] still staged a cluster permission: %+v", permission)
+		}
+	}
+
+	rp, err := cluster.ResourcePool(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roleGroups, ok := privsets.Groups("openshift-installer")
+	if !ok {
+		t.Fatal("openshift-installer role missing")
+	}
 	roles, err := auth.RoleList(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stagedRoles int
-	for _, role := range roles {
-		if !role.System {
-			stagedRoles++
+	baseline := object.AuthorizationRoleList(roles).ByName("ReadOnly").Privilege
+	results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{rp.Reference()}, "nocluster")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("resource pool privileges = %+v, err = %v", results, err)
+	}
+	got := append([]string(nil), results[0].Privileges...)
+	sort.Strings(got)
+	want := append(append([]string(nil), roleGroups["resourcepool"]...), baseline...)
+	sort.Strings(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("resource pool privileges = %v, want the resourcepool group plus the system baseline %v", got, want)
+	}
+
+	rootPermissions, err := auth.RetrieveEntityPermissions(ctx, c.Client.ServiceContent.RootFolder, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gapless, noroot bool
+	for _, permission := range rootPermissions {
+		switch permission.Principal {
+		case "gapless":
+			gapless = true
+		case "noroot":
+			noroot = true
 		}
 	}
-	if stagedRoles != 2 {
-		t.Errorf("created %d roles, want 2 distinct privilege sets", stagedRoles)
+	if !gapless {
+		t.Error("gapless account has no root permission")
 	}
-	entities := []types.ManagedObjectReference{c.ServiceContent.RootFolder}
-	for _, fd := range sc.FailureDomains {
-		dc, err := find.NewFinder(c.Client).Datacenter(ctx, fd.Datacenter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		entities = append(entities, dc.Reference())
-		folders, err := dc.Folders(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{folders.VmFolder.Reference()}, "installer")
-		if err != nil || len(results) != 1 {
-			t.Fatalf("child privileges = %+v, err = %v", results, err)
-		}
-		if !slices.Contains(results[0].Privileges, "VirtualMachine.Inventory.Create") || slices.Contains(results[0].Privileges, "Cns.Searchable") {
-			t.Errorf("child privileges do not inherit only the FD role: %v", results[0].Privileges)
-		}
-	}
-	for i, entity := range entities {
-		permissions, err := auth.RetrieveEntityPermissions(ctx, entity, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var staged []types.Permission
-		for _, permission := range permissions {
-			if permission.Principal == "installer" || permission.Principal == "other" {
-				staged = append(staged, permission)
-				role := roles.ById(permission.RoleId)
-				if role == nil {
-					t.Fatalf("missing role %d", permission.RoleId)
-				}
-				if permission.Group || permission.Propagate != (i != 0) {
-					t.Errorf("incorrect permission scope: %+v", permission)
-				}
-				for privilege, want := range map[string]bool{
-					"Cns.Searchable": i == 0, "VirtualMachine.Inventory.Create": i != 0,
-					"Global.LogEvent": true, "Authorization.ModifyRoles": false,
-				} {
-					if slices.Contains(role.Privilege, privilege) != want {
-						t.Errorf("entity %s role %s contains %s, want %t", entity, role.Name, privilege, want)
-					}
-				}
-			}
-		}
-		if len(staged) != 2 {
-			t.Errorf("entity %s has %d staged permissions, want 2", entity, len(staged))
-		} else if staged[0].RoleId != staged[1].RoleId {
-			t.Errorf("identical privilege sets did not reuse a role: %+v", staged)
-		}
+	if noroot {
+		t.Error("without: [vcenter] still staged a root permission")
 	}
 }
 

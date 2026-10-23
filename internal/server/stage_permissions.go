@@ -18,6 +18,12 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
+// stagePermissions stages each privilege group as its own role on the objects
+// that group is scoped to, mirroring the per-object permission layout the
+// installer documents for administrators. Roles do not propagate: consumers
+// check privileges on the staged objects themselves, and propagation would let
+// a broader group (for example the datacenter group) mask a deliberately
+// skipped group on nested objects.
 func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
 	auth := object.NewAuthorizationManager(c)
 	finder := find.NewFinder(c)
@@ -41,6 +47,22 @@ func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scen
 		roles[key] = id
 		return id, nil
 	}
+
+	// entities maps each failure domain's privilege groups to the objects the
+	// group's role is staged on, resolved once per failure domain.
+	entities := make(map[string]map[string][]types.ManagedObjectReference, len(sc.FailureDomains))
+	entitiesFor := func(fd scenario.FailureDomain) (map[string][]types.ManagedObjectReference, error) {
+		if e, ok := entities[fd.Name]; ok {
+			return e, nil
+		}
+		e, err := fdEntities(ctx, finder, fd)
+		if err != nil {
+			return nil, err
+		}
+		entities[fd.Name] = e
+		return e, nil
+	}
+
 	for _, account := range sc.Accounts {
 		rootSet := make(map[string]struct{})
 		for _, grant := range account.Grants {
@@ -48,28 +70,39 @@ func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scen
 			if !ok {
 				return fmt.Errorf("account %s: unknown role %q", account.Name, grant.Role)
 			}
-			for id := range grantPrivileges(groups, privsets.VCenterGroups, grant) {
-				rootSet[id] = struct{}{}
+			if !slices.Contains(grant.Without, "vcenter") {
+				for id := range grantPrivileges(groups, privsets.VCenterGroups, grant) {
+					rootSet[id] = struct{}{}
+				}
 			}
-			fdSet := grantPrivileges(groups, privsets.FDGroups, grant)
 			for _, fd := range sc.FailureDomains {
 				if !slices.Contains(grant.On, "*") && !slices.Contains(grant.On, fd.Name) {
 					continue
 				}
-				dc, err := finder.Datacenter(ctx, fd.Datacenter)
-				if err != nil {
-					return fmt.Errorf("find datacenter for failure domain %s: %w", fd.Name, err)
-				}
-				roleID, err := roleFor(fdSet)
+				fdObjects, err := entitiesFor(fd)
 				if err != nil {
 					return err
 				}
-				if err := auth.SetEntityPermissions(ctx, dc.Reference(), []types.Permission{{
-					Principal: account.Name, Group: false, RoleId: roleID, Propagate: true,
-				}}); err != nil {
-					return fmt.Errorf("account %s on failure domain %s: %w", account.Name, fd.Name, err)
+				for _, group := range privsets.FDGroups {
+					if slices.Contains(grant.Without, group) {
+						continue
+					}
+					roleID, err := roleFor(grantPrivileges(groups, []string{group}, grant))
+					if err != nil {
+						return err
+					}
+					for _, entity := range fdObjects[group] {
+						if err := auth.SetEntityPermissions(ctx, entity, []types.Permission{{
+							Principal: account.Name, Group: false, RoleId: roleID, Propagate: false,
+						}}); err != nil {
+							return fmt.Errorf("account %s group %s on failure domain %s: %w", account.Name, group, fd.Name, err)
+						}
+					}
 				}
 			}
+		}
+		if len(rootSet) == 0 {
+			continue
 		}
 		roleID, err := roleFor(rootSet)
 		if err != nil {
@@ -82,6 +115,48 @@ func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scen
 		}
 	}
 	return nil
+}
+
+// fdEntities resolves a failure domain's inventory objects per privilege group.
+func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDomain) (map[string][]types.ManagedObjectReference, error) {
+	dc, err := finder.Datacenter(ctx, fd.Datacenter)
+	if err != nil {
+		return nil, fmt.Errorf("find datacenter for failure domain %s: %w", fd.Name, err)
+	}
+	folders, err := dc.Folders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get folders for failure domain %s: %w", fd.Name, err)
+	}
+	clusterPath := "/" + fd.Datacenter + "/host/" + fd.Cluster
+	cluster, err := finder.ClusterComputeResource(ctx, clusterPath)
+	if err != nil {
+		return nil, fmt.Errorf("find cluster for failure domain %s: %w", fd.Name, err)
+	}
+	rp, err := cluster.ResourcePool(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("find root resource pool for failure domain %s: %w", fd.Name, err)
+	}
+	entities := map[string][]types.ManagedObjectReference{
+		"datacenter":   {dc.Reference()},
+		"cluster":      {cluster.Reference()},
+		"resourcepool": {rp.Reference()},
+		"folder":       {folders.VmFolder.Reference()},
+	}
+	for _, name := range fd.Networks {
+		network, err := finder.Network(ctx, "/"+fd.Datacenter+"/network/"+name)
+		if err != nil {
+			return nil, fmt.Errorf("find network %s for failure domain %s: %w", name, fd.Name, err)
+		}
+		entities["portgroup"] = append(entities["portgroup"], network.Reference())
+	}
+	for _, name := range fd.Datastores {
+		datastore, err := finder.Datastore(ctx, "/"+fd.Datacenter+"/datastore/"+name)
+		if err != nil {
+			return nil, fmt.Errorf("find datastore %s for failure domain %s: %w", name, fd.Name, err)
+		}
+		entities["datastore"] = append(entities["datastore"], datastore.Reference())
+	}
+	return entities, nil
 }
 
 // Missing is applied last, so it also removes privileges named in Extra.
