@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/openshift-splat-team/fake-center/internal/privsets"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -298,4 +300,52 @@ func assertValidationError(t *testing.T, err error, want []string) {
 			t.Fatalf("validation error = %v, want error containing %q", err, fragment)
 		}
 	}
+}
+
+func TestGrantWithout(t *testing.T) {
+	t.Run("without field loads", func(t *testing.T) {
+		s, err := Parse([]byte(`failureDomains:
+- name: fd1
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    without: [cluster, folder]
+    on: [fd1]
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []Grant{{
+			Role:    "openshift-installer",
+			Without: []string{"cluster", "folder"},
+			On:      []string{"fd1"},
+		}}
+		if got := s.Accounts[0].Grants; !reflect.DeepEqual(got, want) {
+			t.Errorf("grants = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("unknown group rejected", func(t *testing.T) {
+		_, err := Parse([]byte(`failureDomains:
+- name: fd1
+accounts:
+- name: installer
+  grants:
+  - role: openshift-installer
+    without: [nonsense]
+    on: [fd1]
+`))
+		if err == nil {
+			t.Fatal("expected error for unknown privilege group, got nil")
+		}
+		if !strings.Contains(err.Error(), `unknown privilege group "nonsense"`) {
+			t.Errorf("error = %v, want unknown privilege group %q", err, "nonsense")
+		}
+		for _, name := range privsets.GroupNames() {
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("error = %v, want it to list valid group %q", err, name)
+			}
+		}
+	})
 }

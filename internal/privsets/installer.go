@@ -10,6 +10,14 @@ var VCenterGroups = []string{"vcenter"}
 // FDGroups are the privilege groups staged on each failure-domain datacenter.
 var FDGroups = []string{"datacenter", "cluster", "portgroup", "folder", "datastore", "resourcepool"}
 
+// GroupNames lists every privilege group name a scenario grant can stage or skip.
+func GroupNames() []string {
+	names := make([]string, 0, len(VCenterGroups)+len(FDGroups))
+	names = append(names, VCenterGroups...)
+	names = append(names, FDGroups...)
+	return names
+}
+
 var roles = map[string]map[string][]string{
 	"openshift-installer": {
 		"vcenter": {

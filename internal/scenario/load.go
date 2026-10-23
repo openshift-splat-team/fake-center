@@ -118,6 +118,11 @@ func (s *Scenario) validate() error {
 			if _, ok := privsets.Groups(grant.Role); !ok {
 				return fmt.Errorf("account %q: unknown role %q; supported role: openshift-installer", account.Name, grant.Role)
 			}
+			for _, group := range grant.Without {
+				if !slices.Contains(privsets.GroupNames(), group) {
+					return fmt.Errorf("account %q: unknown privilege group %q; valid groups: %s", account.Name, group, strings.Join(privsets.GroupNames(), ", "))
+				}
+			}
 			for _, privilege := range grant.Missing {
 				if strings.HasPrefix(privilege, "System.") {
 					return fmt.Errorf("account %q: missing privilege %q cannot be gapped: the simulator's role baseline always includes System.* privileges", account.Name, privilege)
