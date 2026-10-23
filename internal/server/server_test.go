@@ -352,7 +352,11 @@ func TestPrivilegeGap(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				entity = folders.VmFolder.Reference()
+				vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/"+tc.name+"-vms")
+				if err != nil {
+					t.Fatal(err)
+				}
+				entity = vmFolder.Reference()
 			}
 			results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{entity}, "installer")
 			if err != nil {
@@ -434,6 +438,10 @@ accounts:
 		if err != nil {
 			t.Fatal(err)
 		}
+		vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/fd1-vms")
+		if err != nil {
+			t.Fatal(err)
+		}
 		cluster, err := finder.ClusterComputeResource(ctx, "/fd1/host/fd1-cluster")
 		if err != nil {
 			t.Fatal(err)
@@ -458,7 +466,7 @@ accounts:
 			{"cluster", cluster.Reference()},
 			{"resourcepool", rp.Reference()},
 			{"portgroup", network.Reference()},
-			{"folder", folders.VmFolder.Reference()},
+			{"folder", vmFolder.Reference()},
 			{"datastore", datastore.Reference()},
 			{"vcenter", c.Client.ServiceContent.RootFolder},
 		} {

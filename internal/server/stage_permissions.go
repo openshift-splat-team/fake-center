@@ -148,6 +148,10 @@ func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDom
 	if err != nil {
 		return nil, fmt.Errorf("get folders for failure domain %s: %w", fd.Name, err)
 	}
+	vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/"+fd.VMFolder)
+	if err != nil {
+		return nil, fmt.Errorf("find VM folder for failure domain %s: %w", fd.Name, err)
+	}
 	clusterPath := "/" + fd.Datacenter + "/host/" + fd.Cluster
 	cluster, err := finder.ClusterComputeResource(ctx, clusterPath)
 	if err != nil {
@@ -161,7 +165,7 @@ func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDom
 		"datacenter":   {dc.Reference()},
 		"cluster":      {cluster.Reference()},
 		"resourcepool": {rp.Reference()},
-		"folder":       {folders.VmFolder.Reference()},
+		"folder":       {vmFolder.Reference()},
 	}
 	for _, name := range fd.Networks {
 		network, err := finder.Network(ctx, "/"+fd.Datacenter+"/network/"+name)
