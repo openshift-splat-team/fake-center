@@ -352,7 +352,11 @@ func TestPrivilegeGap(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				entity = folders.VmFolder.Reference()
+				vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/"+tc.name+"-vms")
+				if err != nil {
+					t.Fatal(err)
+				}
+				entity = vmFolder.Reference()
 			}
 			results, err := auth.FetchUserPrivilegeOnEntities(ctx, []types.ManagedObjectReference{entity}, "installer")
 			if err != nil {
@@ -434,6 +438,10 @@ accounts:
 		if err != nil {
 			t.Fatal(err)
 		}
+		vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/fd1-vms")
+		if err != nil {
+			t.Fatal(err)
+		}
 		cluster, err := finder.ClusterComputeResource(ctx, "/fd1/host/fd1-cluster")
 		if err != nil {
 			t.Fatal(err)
@@ -458,7 +466,7 @@ accounts:
 			{"cluster", cluster.Reference()},
 			{"resourcepool", rp.Reference()},
 			{"portgroup", network.Reference()},
-			{"folder", folders.VmFolder.Reference()},
+			{"folder", vmFolder.Reference()},
 			{"datastore", datastore.Reference()},
 			{"vcenter", c.Client.ServiceContent.RootFolder},
 		} {
@@ -850,6 +858,35 @@ func TestStagedHostVersionsAreInstanceLocal(t *testing.T) {
 			}
 			if h.Config.Product.Version != version || h.Summary.Config.Product == nil || h.Summary.Config.Product.Version != version {
 				t.Errorf("instance %d host %s: config = %+v, summary = %+v, want %s", i, host.Name(), h.Config.Product, h.Summary.Config.Product, version)
+			}
+		}
+	}
+}
+
+func TestPrivilegeList(t *testing.T) {
+	s := newTestServer(t)
+	c := loopbackClient(t, s)
+	ctx := context.Background()
+	var authManagerMo mo.AuthorizationManager
+	err := object.NewAuthorizationManager(c.Client).Properties(ctx, *c.Client.ServiceContent.AuthorizationManager, []string{"privilegeList"}, &authManagerMo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	available := make(map[string]bool, len(authManagerMo.PrivilegeList))
+	for _, privilege := range authManagerMo.PrivilegeList {
+		available[privilege.PrivId] = true
+	}
+	if len(available) == 0 {
+		t.Fatal("AuthorizationManager advertises an empty privilege list")
+	}
+	roleGroups, ok := privsets.Groups("openshift-installer")
+	if !ok {
+		t.Fatal("openshift-installer role missing")
+	}
+	for group, privileges := range roleGroups {
+		for _, id := range privileges {
+			if !available[id] {
+				t.Errorf("privilege %s in group %s missing from the advertised catalog", id, group)
 			}
 		}
 	}

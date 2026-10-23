@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-splat-team/fake-center/internal/scenario"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/simulator"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/types"
 )
@@ -25,6 +26,9 @@ import (
 // a broader group (for example the datacenter group) mask a deliberately
 // skipped group on nested objects.
 func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
+	if err := s.stagePrivilegeList(c); err != nil {
+		return err
+	}
 	auth := object.NewAuthorizationManager(c)
 	finder := find.NewFinder(c)
 	roles := make(map[string]int32)
@@ -117,6 +121,23 @@ func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scen
 	return nil
 }
 
+// stagePrivilegeList publishes the simulator's known-privilege catalog on the
+// AuthorizationManager, mirroring real vCenter: clients such as the installer
+// prune their required privileges against the advertised list.
+func (s *Server) stagePrivilegeList(c *vim25.Client) error {
+	ref := *c.ServiceContent.AuthorizationManager
+	am, ok := s.model.Map().Get(ref).(*simulator.AuthorizationManager)
+	if !ok {
+		return fmt.Errorf("resolve AuthorizationManager %s", ref)
+	}
+	admin := object.AuthorizationRoleList(am.RoleList).ByName("Admin")
+	am.PrivilegeList = make([]types.AuthorizationPrivilege, len(admin.Privilege))
+	for i, id := range admin.Privilege {
+		am.PrivilegeList[i] = types.AuthorizationPrivilege{PrivId: id}
+	}
+	return nil
+}
+
 // fdEntities resolves a failure domain's inventory objects per privilege group.
 func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDomain) (map[string][]types.ManagedObjectReference, error) {
 	dc, err := finder.Datacenter(ctx, fd.Datacenter)
@@ -126,6 +147,10 @@ func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDom
 	folders, err := dc.Folders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get folders for failure domain %s: %w", fd.Name, err)
+	}
+	vmFolder, err := finder.Folder(ctx, folders.VmFolder.InventoryPath+"/"+fd.VMFolder)
+	if err != nil {
+		return nil, fmt.Errorf("find VM folder for failure domain %s: %w", fd.Name, err)
 	}
 	clusterPath := "/" + fd.Datacenter + "/host/" + fd.Cluster
 	cluster, err := finder.ClusterComputeResource(ctx, clusterPath)
@@ -140,7 +165,7 @@ func fdEntities(ctx context.Context, finder *find.Finder, fd scenario.FailureDom
 		"datacenter":   {dc.Reference()},
 		"cluster":      {cluster.Reference()},
 		"resourcepool": {rp.Reference()},
-		"folder":       {folders.VmFolder.Reference()},
+		"folder":       {vmFolder.Reference()},
 	}
 	for _, name := range fd.Networks {
 		network, err := finder.Network(ctx, "/"+fd.Datacenter+"/network/"+name)
