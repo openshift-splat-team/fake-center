@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-splat-team/fake-center/internal/scenario"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/simulator"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/types"
 )
@@ -25,6 +26,9 @@ import (
 // a broader group (for example the datacenter group) mask a deliberately
 // skipped group on nested objects.
 func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scenario.Scenario) error {
+	if err := s.stagePrivilegeList(c); err != nil {
+		return err
+	}
 	auth := object.NewAuthorizationManager(c)
 	finder := find.NewFinder(c)
 	roles := make(map[string]int32)
@@ -113,6 +117,23 @@ func (s *Server) stagePermissions(ctx context.Context, c *vim25.Client, sc *scen
 		}}); err != nil {
 			return fmt.Errorf("account %s on root folder: %w", account.Name, err)
 		}
+	}
+	return nil
+}
+
+// stagePrivilegeList publishes the simulator's known-privilege catalog on the
+// AuthorizationManager, mirroring real vCenter: clients such as the installer
+// prune their required privileges against the advertised list.
+func (s *Server) stagePrivilegeList(c *vim25.Client) error {
+	ref := *c.ServiceContent.AuthorizationManager
+	am, ok := s.model.Map().Get(ref).(*simulator.AuthorizationManager)
+	if !ok {
+		return fmt.Errorf("resolve AuthorizationManager %s", ref)
+	}
+	admin := object.AuthorizationRoleList(am.RoleList).ByName("Admin")
+	am.PrivilegeList = make([]types.AuthorizationPrivilege, len(admin.Privilege))
+	for i, id := range admin.Privilege {
+		am.PrivilegeList[i] = types.AuthorizationPrivilege{PrivId: id}
 	}
 	return nil
 }
