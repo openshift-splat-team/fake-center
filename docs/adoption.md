@@ -42,9 +42,9 @@ startup errors include a log tail.
 
 | Helper environment variable | Default | Purpose |
 | --- | --- | --- |
-| `FAKE_CENTER_IMAGE` | `quay.io/ocp-splat/fake-center:latest` | Image/tag/digest to launch; use `fake-center:dev` after a local build. |
-| `FAKE_CENTER_RUNTIME` | Autodetect Podman, then Docker | Force `podman` or `docker`; errors if the selected binary is unavailable. |
-| `FAKE_CENTER_STARTUP_TIMEOUT` | `120s` | Positive Go duration, including image pull time; for example `3m`. |
+| `VCENTER_TEST_PROFILES_IMAGE` | `quay.io/ocp-splat/vcenter-test-profiles:latest` | Image/tag/digest to launch; use `vcenter-test-profiles:dev` after a local build. |
+| `VCENTER_TEST_PROFILES_RUNTIME` | Autodetect Podman, then Docker | Force `podman` or `docker`; errors if the selected binary is unavailable. |
+| `VCENTER_TEST_PROFILES_STARTUP_TIMEOUT` | `120s` | Positive Go duration, including image pull time; for example `3m`. |
 
 The helper launches containers only; it does not adopt pre-provisioned services.
 
@@ -155,27 +155,27 @@ the runtime to support publication on the selected address. Both modes are
 **not yet verified on macOS**; the Linux `sysctl` command above does not apply.
 
 This repository's helper integration test enforces no-port-suffix publication
-when `FAKE_CENTER_STRICT=1` is set, as in CI; it fails rather than accepting a
+when `VCENTER_TEST_PROFILES_STRICT=1` is set, as in CI; it fails rather than accepting a
 fallback result. Without that setting, the test accepts either mode. This is a
 test assertion, not a switch that disables fallback in `Start`.
 
 ## Debug locally
 
-Run tests with `-v -count=1` and pin `FAKE_CENTER_IMAGE` to a `sha-<12>` tag or
+Run tests with `-v -count=1` and pin `VCENTER_TEST_PROFILES_IMAGE` to a `sha-<12>` tag or
 digest when reproducing a failure. Increase the startup timeout for slow pulls,
 not to hide a bad scenario. Containers disappear at test cleanup; to inspect one
 while the test is paused, find it with `podman ps` and use `podman logs <name>`.
 Use Docker equivalents when Docker is the selected runtime.
 
 For a standalone instance that survives the test lifecycle, run from this repo's
-root (build `fake-center:dev` using the README first):
+root (build `vcenter-test-profiles:dev` using the README first):
 
 ```sh
 podman run --detach --name fake-center-debug \
   --publish 127.0.0.1:8443:443 \
-  --env FAKE_CENTER_SCENARIO="$(cat examples/scenarios/insufficient-privs.yaml)" \
-  --env FAKE_CENTER_SANS=127.0.0.1 \
-  fake-center:dev
+  --env VCENTER_TEST_PROFILES_SCENARIO="$(cat examples/scenarios/insufficient-privs.yaml)" \
+  --env VCENTER_TEST_PROFILES_SANS=127.0.0.1 \
+  vcenter-test-profiles:dev
 podman logs fake-center-debug
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/healthz
 curl -sk https://127.0.0.1:8443/ca.pem -o /tmp/fake-center-debug-ca.pem
@@ -188,8 +188,8 @@ body when ready. `/ca.pem` serves the instance CA; `/accounts.json` lists accoun
 names, not passwords. Use the trusted govmomi client pattern in the example to
 inspect staged inventory and effective privileges over `/sdk`.
 
-For manual launches, `FAKE_CENTER_SCENARIO` is YAML **content**, not a filename;
-`FAKE_CENTER_SANS` is a comma-separated list of additional DNS/IP certificate
+For manual launches, `VCENTER_TEST_PROFILES_SCENARIO` is YAML **content**, not a filename;
+`VCENTER_TEST_PROFILES_SANS` is a comma-separated list of additional DNS/IP certificate
 SANs for addresses clients will dial. The helper supplies both automatically.
 The `curl -k` commands above are bootstrap/debugging only; component tests must
 verify TLS with the returned CA. Keep diagnostic endpoints on a local/private

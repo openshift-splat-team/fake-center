@@ -45,7 +45,7 @@ func (v *VCenter) Account(name string) (AccountRef, bool) {
 }
 
 // Start launches a container from scenarioPath and registers its cleanup with
-// tb. FAKE_CENTER_IMAGE overrides the default image; FAKE_CENTER_STARTUP_TIMEOUT
+// tb. VCENTER_TEST_PROFILES_IMAGE overrides the default image; VCENTER_TEST_PROFILES_STARTUP_TIMEOUT
 // accepts a Go duration (default 120s), including time spent pulling the image.
 func Start(tb testing.TB, scenarioPath string) (*VCenter, error) {
 	tb.Helper()
@@ -82,10 +82,10 @@ func startWithRuntime(tb testing.TB, scenarioPath string, runtime runner, client
 		return nil, fmt.Errorf("read scenario: %w", err)
 	}
 	timeout := 120 * time.Second
-	if value := os.Getenv("FAKE_CENTER_STARTUP_TIMEOUT"); value != "" {
+	if value := os.Getenv("VCENTER_TEST_PROFILES_STARTUP_TIMEOUT"); value != "" {
 		timeout, err = time.ParseDuration(value)
 		if err != nil || timeout <= 0 {
-			return nil, fmt.Errorf("FAKE_CENTER_STARTUP_TIMEOUT must be a positive Go duration, got %q", value)
+			return nil, fmt.Errorf("VCENTER_TEST_PROFILES_STARTUP_TIMEOUT must be a positive Go duration, got %q", value)
 		}
 	}
 	ip, err := allocLoopback()

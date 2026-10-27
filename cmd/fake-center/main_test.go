@@ -34,14 +34,14 @@ func TestBinaryConfigurationAndShutdown(t *testing.T) {
 	for _, source := range []string{"environment", "file"} {
 		t.Run(source, func(t *testing.T) {
 			cmd := exec.Command(binary, "-listen", "127.0.0.1:0", "-san", "flag.example.test", "-san", "192.0.2.20")
-			cmd.Env = append(os.Environ(), "FAKE_CENTER_SANS= env.example.test,192.0.2.30 ")
+			cmd.Env = append(os.Environ(), "VCENTER_TEST_PROFILES_SANS= env.example.test,192.0.2.30 ")
 			if source == "environment" {
 				// Invalid file proves the inline environment content takes precedence.
 				cmd.Args = append(cmd.Args, "-scenario", "/does-not-exist")
-				cmd.Env = append(cmd.Env, "FAKE_CENTER_SCENARIO="+yaml)
+				cmd.Env = append(cmd.Env, "VCENTER_TEST_PROFILES_SCENARIO="+yaml)
 			} else {
 				cmd.Args = append(cmd.Args, "-scenario", path)
-				cmd.Env = append(cmd.Env, "FAKE_CENTER_SCENARIO=")
+				cmd.Env = append(cmd.Env, "VCENTER_TEST_PROFILES_SCENARIO=")
 			}
 			stderr, err := cmd.StderrPipe()
 			if err != nil {

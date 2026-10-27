@@ -38,9 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      FAKE_CENTER_IMAGE: fake-center:test
-      FAKE_CENTER_RUNTIME: docker
-      FAKE_CENTER_STRICT: "1"
+      VCENTER_TEST_PROFILES_IMAGE: vcenter-test-profiles:test
+      VCENTER_TEST_PROFILES_RUNTIME: docker
+      VCENTER_TEST_PROFILES_STRICT: "1"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -51,7 +51,7 @@ jobs:
           go-version: "1.25"
 
       - name: Build test image
-        run: docker build -t fake-center:test .
+        run: docker build -t vcenter-test-profiles:test .
 
       - name: Test root module with image
         run: go test ./... -v
@@ -78,7 +78,7 @@ jobs:
 
       - name: Build and push image
         env:
-          IMAGE: quay.io/ocp-splat/fake-center
+          IMAGE: quay.io/ocp-splat/vcenter-test-profiles
         shell: bash
         run: |
           set -euo pipefail

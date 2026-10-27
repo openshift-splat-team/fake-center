@@ -32,11 +32,11 @@ func (r commandRunner) run(ctx context.Context, args ...string) (string, error) 
 }
 
 func detectRuntime() (runner, error) {
-	forced := os.Getenv("FAKE_CENTER_RUNTIME")
+	forced := os.Getenv("VCENTER_TEST_PROFILES_RUNTIME")
 	executables := []string{"podman", "docker"}
 	if forced != "" {
 		if forced != "podman" && forced != "docker" {
-			return nil, fmt.Errorf("invalid FAKE_CENTER_RUNTIME %q: must be podman or docker", forced)
+			return nil, fmt.Errorf("invalid VCENTER_TEST_PROFILES_RUNTIME %q: must be podman or docker", forced)
 		}
 		executables = []string{forced}
 	}
@@ -49,7 +49,7 @@ func detectRuntime() (runner, error) {
 			return r, nil
 		}
 		if forced != "" {
-			return nil, fmt.Errorf("FAKE_CENTER_RUNTIME=%s is unavailable; install %s and ensure it is on PATH: %w", forced, forced, err)
+			return nil, fmt.Errorf("VCENTER_TEST_PROFILES_RUNTIME=%s is unavailable; install %s and ensure it is on PATH: %w", forced, forced, err)
 		}
 	}
 	return nil, errors.New("no container runtime available; install podman or docker and ensure it is on PATH")
@@ -60,15 +60,15 @@ func buildRunArgs(ip, name string, scenario []byte) []string {
 }
 
 func buildRunArgsPort(ip, name string, scenario []byte, port string) []string {
-	image := os.Getenv("FAKE_CENTER_IMAGE")
+	image := os.Getenv("VCENTER_TEST_PROFILES_IMAGE")
 	if image == "" {
-		image = "quay.io/ocp-splat/fake-center:latest"
+		image = "quay.io/ocp-splat/vcenter-test-profiles:latest"
 	}
 	return []string{
 		"run", "--detach", "--name", name,
 		"--publish", net.JoinHostPort(ip, port) + ":443",
-		"--env", "FAKE_CENTER_SCENARIO=" + string(scenario),
-		"--env", "FAKE_CENTER_SANS=" + ip,
+		"--env", "VCENTER_TEST_PROFILES_SCENARIO=" + string(scenario),
+		"--env", "VCENTER_TEST_PROFILES_SANS=" + ip,
 		image,
 	}
 }

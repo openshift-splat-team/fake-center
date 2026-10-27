@@ -25,8 +25,8 @@ import (
 // TestInstallerPrivileges demonstrates the installer's CA-trusting client setup
 // against an isolated container and proves a failure-domain-specific privilege gap.
 func TestInstallerPrivileges(t *testing.T) {
-	if os.Getenv("FAKE_CENTER_IMAGE") == "" {
-		t.Skip("set FAKE_CENTER_IMAGE to run container integration tests")
+	if os.Getenv("VCENTER_TEST_PROFILES_IMAGE") == "" {
+		t.Skip("set VCENTER_TEST_PROFILES_IMAGE to run container integration tests")
 	}
 	available := false
 	for _, runtime := range []string{"podman", "docker"} {

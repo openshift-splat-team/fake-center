@@ -25,7 +25,7 @@ import (
 )
 
 func TestStartNoRuntime(t *testing.T) {
-	t.Setenv("FAKE_CENTER_RUNTIME", "")
+	t.Setenv("VCENTER_TEST_PROFILES_RUNTIME", "")
 	t.Setenv("PATH", t.TempDir())
 	_, err := Start(t, "testdata/minimal.yaml")
 	if err == nil || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") || !strings.Contains(err.Error(), "install") {
@@ -46,8 +46,8 @@ func (tb *integrationTB) Log(args ...any) {
 }
 
 func TestStartIntegration(t *testing.T) {
-	if os.Getenv("FAKE_CENTER_IMAGE") == "" {
-		t.Skip("set FAKE_CENTER_IMAGE to run container integration tests")
+	if os.Getenv("VCENTER_TEST_PROFILES_IMAGE") == "" {
+		t.Skip("set VCENTER_TEST_PROFILES_IMAGE to run container integration tests")
 	}
 	if _, err := detectRuntime(); err != nil {
 		t.Skip(err)
@@ -105,8 +105,8 @@ func TestStartIntegration(t *testing.T) {
 }
 
 func strictPublicationError(u *url.URL) error {
-	if os.Getenv("FAKE_CENTER_STRICT") == "1" && u.Port() != "" {
-		return fmt.Errorf("FAKE_CENTER_STRICT=1 requires strict port-443 publication without a port suffix; Server = %s", u)
+	if os.Getenv("VCENTER_TEST_PROFILES_STRICT") == "1" && u.Port() != "" {
+		return fmt.Errorf("VCENTER_TEST_PROFILES_STRICT=1 requires strict port-443 publication without a port suffix; Server = %s", u)
 	}
 	return nil
 }
@@ -126,7 +126,7 @@ func TestStrictPublication(t *testing.T) {
 		{name: "only one enables strict", strict: "0", server: "https://127.0.0.2:49152"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("FAKE_CENTER_STRICT", tc.strict)
+			t.Setenv("VCENTER_TEST_PROFILES_STRICT", tc.strict)
 			u, err := url.Parse(tc.server)
 			if err != nil {
 				t.Fatal(err)
@@ -135,7 +135,7 @@ func TestStrictPublication(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("strict publication error = %v, want error %t", err, tc.wantErr)
 			}
-			if err != nil && (!strings.Contains(err.Error(), "FAKE_CENTER_STRICT=1") || !strings.Contains(err.Error(), tc.server)) {
+			if err != nil && (!strings.Contains(err.Error(), "VCENTER_TEST_PROFILES_STRICT=1") || !strings.Contains(err.Error(), tc.server)) {
 				t.Fatalf("strict failure must identify the setting and Server: %v", err)
 			}
 		})
@@ -143,7 +143,7 @@ func TestStrictPublication(t *testing.T) {
 }
 
 func TestDetectRuntime(t *testing.T) {
-	t.Setenv("FAKE_CENTER_RUNTIME", "")
+	t.Setenv("VCENTER_TEST_PROFILES_RUNTIME", "")
 	for _, podmanWorks := range []bool{true, false} {
 		t.Run(fmt.Sprint(podmanWorks), func(t *testing.T) {
 			dir := t.TempDir()
@@ -191,10 +191,10 @@ func TestDetectRuntimeOverride(t *testing.T) {
 					}
 				}
 				t.Setenv("PATH", dir)
-				t.Setenv("FAKE_CENTER_RUNTIME", forced)
+				t.Setenv("VCENTER_TEST_PROFILES_RUNTIME", forced)
 				runtime, err := detectRuntime()
 				if !available {
-					if err == nil || !strings.Contains(err.Error(), "FAKE_CENTER_RUNTIME") || !strings.Contains(err.Error(), forced) {
+					if err == nil || !strings.Contains(err.Error(), "VCENTER_TEST_PROFILES_RUNTIME") || !strings.Contains(err.Error(), forced) {
 						t.Fatalf("expected clear forced-runtime error without fallback, got runtime=%v, err=%v", runtime, err)
 					}
 					return
@@ -209,9 +209,9 @@ func TestDetectRuntimeOverride(t *testing.T) {
 		}
 	}
 	t.Run("invalid", func(t *testing.T) {
-		t.Setenv("FAKE_CENTER_RUNTIME", "other")
+		t.Setenv("VCENTER_TEST_PROFILES_RUNTIME", "other")
 		_, err := detectRuntime()
-		if err == nil || !strings.Contains(err.Error(), "FAKE_CENTER_RUNTIME") || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") {
+		if err == nil || !strings.Contains(err.Error(), "VCENTER_TEST_PROFILES_RUNTIME") || !strings.Contains(err.Error(), "podman") || !strings.Contains(err.Error(), "docker") {
 			t.Fatalf("expected supported-runtime validation error, got %v", err)
 		}
 	})
@@ -260,12 +260,12 @@ func TestLoopbackAllocation(t *testing.T) {
 func TestBuildRunArgs(t *testing.T) {
 	for _, image := range []string{"", "example.com/custom:v1"} {
 		t.Run(image, func(t *testing.T) {
-			t.Setenv("FAKE_CENTER_IMAGE", image)
+			t.Setenv("VCENTER_TEST_PROFILES_IMAGE", image)
 			wantImage := image
 			if image == "" {
-				wantImage = "quay.io/ocp-splat/fake-center:latest"
+				wantImage = "quay.io/ocp-splat/vcenter-test-profiles:latest"
 			}
-			want := []string{"run", "--detach", "--name", "fake-center-test-abcd", "--publish", "127.0.0.7:443:443", "--env", "FAKE_CENTER_SCENARIO=accounts:\n- name: installer\n", "--env", "FAKE_CENTER_SANS=127.0.0.7", wantImage}
+			want := []string{"run", "--detach", "--name", "fake-center-test-abcd", "--publish", "127.0.0.7:443:443", "--env", "VCENTER_TEST_PROFILES_SCENARIO=accounts:\n- name: installer\n", "--env", "VCENTER_TEST_PROFILES_SANS=127.0.0.7", wantImage}
 			got := buildRunArgs("127.0.0.7", "fake-center-test-abcd", []byte("accounts:\n- name: installer\n"))
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("args = %#v, want %#v", got, want)
@@ -314,7 +314,7 @@ func tlsClient(t *testing.T, handler http.HandlerFunc) *http.Client {
 }
 
 func TestStartTimeoutIncludesLogs(t *testing.T) {
-	t.Setenv("FAKE_CENTER_STARTUP_TIMEOUT", "200ms")
+	t.Setenv("VCENTER_TEST_PROFILES_STARTUP_TIMEOUT", "200ms")
 	var requests atomic.Int32
 	client := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -395,7 +395,7 @@ func TestStartSuccessAndCleanup(t *testing.T) {
 }
 
 func TestStartRetriesPublishCollision(t *testing.T) {
-	t.Setenv("FAKE_CENTER_STARTUP_TIMEOUT", "200ms")
+	t.Setenv("VCENTER_TEST_PROFILES_STARTUP_TIMEOUT", "200ms")
 	var runs atomic.Int32
 	var published []string
 	client := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -539,7 +539,7 @@ func TestStartFallsBackOnPublishPermission(t *testing.T) {
 				t.Fatalf("launches = %d, want exactly 2", runs)
 			}
 			ip := strings.Split(calls[0][5], ":")[0]
-			if calls[0][5] != ip+":443:443" || calls[1][0] != "rm" || calls[2][0] != "run" || calls[2][5] != ip+"::443" || calls[2][9] != "FAKE_CENTER_SANS="+ip {
+			if calls[0][5] != ip+":443:443" || calls[1][0] != "rm" || calls[2][0] != "run" || calls[2][5] != ip+"::443" || calls[2][9] != "VCENTER_TEST_PROFILES_SANS="+ip {
 				t.Fatalf("expected primary publication, removal, then ephemeral publication with same SAN: %v", calls)
 			}
 			if !tc.persistent {

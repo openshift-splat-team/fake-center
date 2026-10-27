@@ -37,19 +37,19 @@ func run() error {
 	var extraSANs sans
 	flag.Var(&extraSANs, "san", "Additional certificate SAN (repeatable)")
 	flag.Parse()
-	for _, san := range strings.Split(os.Getenv("FAKE_CENTER_SANS"), ",") {
+	for _, san := range strings.Split(os.Getenv("VCENTER_TEST_PROFILES_SANS"), ",") {
 		if san = strings.TrimSpace(san); san != "" {
 			extraSANs = append(extraSANs, san)
 		}
 	}
 	var sc *scenario.Scenario
 	var err error
-	if content := os.Getenv("FAKE_CENTER_SCENARIO"); content != "" {
+	if content := os.Getenv("VCENTER_TEST_PROFILES_SCENARIO"); content != "" {
 		sc, err = scenario.Parse([]byte(content))
 	} else if *path != "" {
 		sc, err = scenario.Load(*path)
 	} else {
-		return fmt.Errorf("-scenario or FAKE_CENTER_SCENARIO is required")
+		return fmt.Errorf("-scenario or VCENTER_TEST_PROFILES_SCENARIO is required")
 	}
 	if err != nil {
 		return fmt.Errorf("load scenario: %w", err)
