@@ -32,8 +32,8 @@ func TestCIImagePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("integration requires strict 443", func(t *testing.T) {
-		if got := workflow.Jobs["integration"].Env["FAKE_CENTER_STRICT"]; got != "1" {
-			t.Fatalf("integration FAKE_CENTER_STRICT = %q, want 1", got)
+		if got := workflow.Jobs["integration"].Env["VCENTER_TEST_PROFILES_STRICT"]; got != "1" {
+			t.Fatalf("integration VCENTER_TEST_PROFILES_STRICT = %q, want 1", got)
 		}
 	})
 	var script string

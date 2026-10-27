@@ -14,12 +14,12 @@ Prerequisites: Git, Go 1.25+, and a working Podman or Docker installation on PAT
 ```sh
 git clone https://github.com/openshift-splat-team/fake-center.git
 cd fake-center
-podman build -t fake-center:dev .
-FAKE_CENTER_IMAGE=fake-center:dev go test -count=1 -v ./examples -run '^TestInstallerPrivileges$'
+podman build -t vcenter-test-profiles:dev .
+VCENTER_TEST_PROFILES_IMAGE=vcenter-test-profiles:dev go test -count=1 -v ./examples -run '^TestInstallerPrivileges$'
 ```
 
 With Docker only, replace `podman build` with `docker build`. Already have a
-checkout and `fake-center:dev`? Run just the last command from the repository root.
+checkout and `vcenter-test-profiles:dev`? Run just the last command from the repository root.
 
 Expect `PASS` for both `fd1` and `fd2`. The test loads
 [`examples/scenarios/insufficient-privs.yaml`](examples/scenarios/insufficient-privs.yaml),
@@ -42,7 +42,7 @@ The canonical image is `quay.io/ocp-splat/vcenter-test-profiles`:
 - `latest`: moving main-branch image; the helper's default tag.
 - `v*`: release tags, for example `v0.1.0` when released.
 
-Set `FAKE_CENTER_IMAGE` to select an image or digest. Server-side simulator fixes
+Set `VCENTER_TEST_PROFILES_IMAGE` to select an image or digest. Server-side simulator fixes
 come from the nightly-upstream-synced govmomi fork. The root `go.mod` pins:
 
 ```go
