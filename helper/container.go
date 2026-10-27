@@ -62,7 +62,7 @@ func buildRunArgs(ip, name string, scenario []byte) []string {
 func buildRunArgsPort(ip, name string, scenario []byte, port string) []string {
 	image := os.Getenv("FAKE_CENTER_IMAGE")
 	if image == "" {
-		image = "quay.io/ocp-splat/fake-center:latest"
+		image = "quay.io/ocp-splat/vcenter-test-profiles:latest"
 	}
 	return []string{
 		"run", "--detach", "--name", name,

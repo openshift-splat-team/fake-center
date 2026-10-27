@@ -42,7 +42,7 @@ startup errors include a log tail.
 
 | Helper environment variable | Default | Purpose |
 | --- | --- | --- |
-| `FAKE_CENTER_IMAGE` | `quay.io/ocp-splat/fake-center:latest` | Image/tag/digest to launch; use `fake-center:dev` after a local build. |
+| `FAKE_CENTER_IMAGE` | `quay.io/ocp-splat/vcenter-test-profiles:latest` | Image/tag/digest to launch; use `fake-center:dev` after a local build. |
 | `FAKE_CENTER_RUNTIME` | Autodetect Podman, then Docker | Force `podman` or `docker`; errors if the selected binary is unavailable. |
 | `FAKE_CENTER_STARTUP_TIMEOUT` | `120s` | Positive Go duration, including image pull time; for example `3m`. |
 

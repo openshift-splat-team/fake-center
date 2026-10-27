@@ -263,7 +263,7 @@ func TestBuildRunArgs(t *testing.T) {
 			t.Setenv("FAKE_CENTER_IMAGE", image)
 			wantImage := image
 			if image == "" {
-				wantImage = "quay.io/ocp-splat/fake-center:latest"
+				wantImage = "quay.io/ocp-splat/vcenter-test-profiles:latest"
 			}
 			want := []string{"run", "--detach", "--name", "fake-center-test-abcd", "--publish", "127.0.0.7:443:443", "--env", "FAKE_CENTER_SCENARIO=accounts:\n- name: installer\n", "--env", "FAKE_CENTER_SANS=127.0.0.7", wantImage}
 			got := buildRunArgs("127.0.0.7", "fake-center-test-abcd", []byte("accounts:\n- name: installer\n"))

@@ -50,7 +50,7 @@ tests:
   capabilities: [nested-podman]
   nested_podman: true
   commands: |
-    export FAKE_CENTER_IMAGE=quay.io/ocp-splat/fake-center:<tag>
+    export FAKE_CENTER_IMAGE=quay.io/ocp-splat/vcenter-test-profiles:<tag>
     /opt/component-tests/vsphere.test -test.v
   container:
     from: fake-center-tests

@@ -36,7 +36,7 @@ URL injection into your real component client.
 
 ## Images and dependency updates
 
-The canonical image is `quay.io/ocp-splat/fake-center`:
+The canonical image is `quay.io/ocp-splat/vcenter-test-profiles`:
 
 - `sha-<12>`: source commit's first 12 hexadecimal characters; pin for reproducibility.
 - `latest`: moving main-branch image; the helper's default tag.

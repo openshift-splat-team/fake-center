@@ -78,7 +78,7 @@ jobs:
 
       - name: Build and push image
         env:
-          IMAGE: quay.io/ocp-splat/fake-center
+          IMAGE: quay.io/ocp-splat/vcenter-test-profiles
         shell: bash
         run: |
           set -euo pipefail
