@@ -1,4 +1,4 @@
-# Adopt fake-center in component tests
+# Adopt vcenter-test-profiles in component tests
 
 ## 1. Describe the world
 
@@ -14,11 +14,11 @@ immutable startup input; use a separate instance for another configuration.
 Add the independent, stdlib-only helper module to your component's Go module:
 
 ```sh
-go get github.com/openshift-splat-team/fake-center/helper@latest
+go get github.com/openshift-splat-team/vcenter-test-profiles/helper@latest
 ```
 
 Commit your module's dependency pin. Import it as
-`fakecenter "github.com/openshift-splat-team/fake-center/helper"` and call:
+`fakecenter "github.com/openshift-splat-team/vcenter-test-profiles/helper"` and call:
 
 ```go
 vcenter, err := fakecenter.Start(t, "testdata/insufficient-privs.yaml")
@@ -57,7 +57,7 @@ the SOAP path to `/sdk`, creates `soap.NewClient(u, false)`, calls
 `SetRootCAs(caPath)`, creates `vim25.NewClient`, and logs in through
 `session.NewManager(...).Login` with `url.UserPassword(account.Username,
 account.Password)`. The scenario account name is the username and its password
-is `fake-center`.
+is `vcenter-test-profiles`.
 
 Feed these same values into **your component's real connection path**: its server
 URL setting, credentials, and custom CA file/pool setting. Do not hard-code a
@@ -81,7 +81,7 @@ outlives the instance because Go caches system roots after first use.
 The harness proves the **vCenter-side truth** (for example, `fd2` lacks
 `VirtualMachine.Inventory.Create`). A test in the **consumer repository** proves
 that its real validation consumes that truth correctly. Keep installer/component
-imports there, not in fake-center. The following sketch uses the same trusted
+imports there, not in vcenter-test-profiles. The following sketch uses the same trusted
 client wiring as [`examples/installer_privileges_test.go`](../examples/installer_privileges_test.go);
 replace `validation.ValidateVCenter` and its error sentinel with your component's
 actual entry point and expected error. Standard-library and govmomi imports are
@@ -135,7 +135,7 @@ change on the Linux container host:
 sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0
 ```
 
-This permits unprivileged low-port binds system-wide, not just fake-center;
+This permits unprivileged low-port binds system-wide, not just vcenter-test-profiles;
 follow your host security policy. The setting may reset after reboot. Rerun the
 test and check that no fallback warning appears. The shipped helper uses port
 publishing, **not** the early design's direct-container-IP fallback; do not rely
@@ -171,16 +171,16 @@ For a standalone instance that survives the test lifecycle, run from this repo's
 root (build `vcenter-test-profiles:dev` using the README first):
 
 ```sh
-podman run --detach --name fake-center-debug \
+podman run --detach --name vcenter-test-profiles-debug \
   --publish 127.0.0.1:8443:443 \
   --env VCENTER_TEST_PROFILES_SCENARIO="$(cat examples/scenarios/insufficient-privs.yaml)" \
   --env VCENTER_TEST_PROFILES_SANS=127.0.0.1 \
   vcenter-test-profiles:dev
-podman logs fake-center-debug
+podman logs vcenter-test-profiles-debug
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/healthz
-curl -sk https://127.0.0.1:8443/ca.pem -o /tmp/fake-center-debug-ca.pem
-curl --cacert /tmp/fake-center-debug-ca.pem https://127.0.0.1:8443/accounts.json
-podman rm -f fake-center-debug
+curl -sk https://127.0.0.1:8443/ca.pem -o /tmp/vcenter-test-profiles-debug-ca.pem
+curl --cacert /tmp/vcenter-test-profiles-debug-ca.pem https://127.0.0.1:8443/accounts.json
+podman rm -f vcenter-test-profiles-debug
 ```
 
 Wait for the `ready` log before curling. `/healthz` returns 200 with an empty

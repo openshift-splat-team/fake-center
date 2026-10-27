@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	fakecenter "github.com/openshift-splat-team/fake-center/helper"
+	fakecenter "github.com/openshift-splat-team/vcenter-test-profiles/helper"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/session"

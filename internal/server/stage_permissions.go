@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openshift-splat-team/fake-center/internal/privsets"
-	"github.com/openshift-splat-team/fake-center/internal/scenario"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/privsets"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/scenario"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/simulator"

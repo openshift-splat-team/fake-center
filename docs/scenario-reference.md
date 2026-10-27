@@ -34,7 +34,7 @@ lists also receive defaults.
 | `accounts[].grants[].without` | list of strings | Empty list; privilege group names whose staging is skipped for this grant (`vcenter`, `datacenter`, `cluster`, `portgroup`, `folder`, `datastore`, `resourcepool`). |
 | `accounts[].grants[].on` | list of strings | Empty list (no failure-domain targets); use failure-domain **names** or `["*"]` for all domains. |
 
-Each account's password is `fake-center`; there is no password schema field.
+Each account's password is `vcenter-test-profiles`; there is no password schema field.
 The helper's `Account(name)` returns the credentials. These are test credentials,
 not an access-control boundary: do not expose this service publicly.
 

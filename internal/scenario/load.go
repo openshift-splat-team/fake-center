@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/openshift-splat-team/fake-center/internal/privsets"
-	"github.com/openshift-splat-team/fake-center/internal/release"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/privsets"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/release"
 	"gopkg.in/yaml.v3"
 )
 

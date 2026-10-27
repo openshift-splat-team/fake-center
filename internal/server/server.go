@@ -24,8 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/openshift-splat-team/fake-center/internal/release"
-	"github.com/openshift-splat-team/fake-center/internal/scenario"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/release"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/scenario"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/simulator"
 	"github.com/vmware/govmomi/simulator/esx"

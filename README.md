@@ -1,10 +1,10 @@
-# fake-center
+# vcenter-test-profiles
 
 A scenario-backed fake vCenter for OpenShift component tests. Exercise real
 vSphere connection and validation code—privilege checks, version gates, and
 inventory discovery—without shared hardware. Each container stages an isolated
 world and serves HTTPS on port 443 with its own CA. This complements, not
-replaces, real-vCenter e2e tests. See the [design](docs/superpowers/specs/2026-10-21-fake-center-design.md).
+replaces, real-vCenter e2e tests. See the [design](docs/superpowers/specs/2026-10-21-vcenter-test-profiles-design.md).
 
 ## Quickstart: first scenario-backed test
 
@@ -12,8 +12,8 @@ Prerequisites: Git, Go 1.25+, and a working Podman or Docker installation on PAT
 (the helper prefers Podman). From a fresh checkout:
 
 ```sh
-git clone https://github.com/openshift-splat-team/fake-center.git
-cd fake-center
+git clone https://github.com/openshift-splat-team/vcenter-test-profiles.git
+cd vcenter-test-profiles
 podman build -t vcenter-test-profiles:dev .
 VCENTER_TEST_PROFILES_IMAGE=vcenter-test-profiles:dev go test -count=1 -v ./examples -run '^TestInstallerPrivileges$'
 ```
@@ -29,7 +29,7 @@ container automatically. Some rootless hosts log a high-port fallback warning;
 see [port modes](docs/adoption.md#port-modes-and-fidelity).
 
 Next: put a scenario in your component repo, import the stdlib-only
-`github.com/openshift-splat-team/fake-center/helper` module, and call
+`github.com/openshift-splat-team/vcenter-test-profiles/helper` module, and call
 `fakecenter.Start(t, scenarioPath)`. Follow the [adoption guide](docs/adoption.md)
 and the [canonical worked test](examples/installer_privileges_test.go) for CA and
 URL injection into your real component client.

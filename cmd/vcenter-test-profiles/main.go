@@ -13,8 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/openshift-splat-team/fake-center/internal/scenario"
-	"github.com/openshift-splat-team/fake-center/internal/server"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/scenario"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/server"
 )
 
 type sans []string

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openshift-splat-team/fake-center/internal/privsets"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/privsets"
 )
 
 func TestLoadDefaults(t *testing.T) {

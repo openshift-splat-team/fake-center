@@ -58,11 +58,11 @@ func TestCIImagePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			// Execute the actual workflow script, replacing only docker's side effects.
-			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nif [ \"$1\" = push ]; then echo \"${2#example/fake-center:}\"; fi\n"), 0700); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nif [ \"$1\" = push ]; then echo \"${2#example/vcenter-test-profiles:}\"; fi\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", "-c", script)
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "IMAGE=example/fake-center", "GITHUB_SHA=0123456789abcdef0123456789abcdef01234567", "GITHUB_REF_TYPE="+tc.refType, "GITHUB_REF="+tc.ref, "GITHUB_REF_NAME="+tc.refName)
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "IMAGE=example/vcenter-test-profiles", "GITHUB_SHA=0123456789abcdef0123456789abcdef01234567", "GITHUB_REF_TYPE="+tc.refType, "GITHUB_REF="+tc.ref, "GITHUB_REF_NAME="+tc.refName)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("publish script: %v\n%s", err, output)

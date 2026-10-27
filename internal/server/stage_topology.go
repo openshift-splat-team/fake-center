@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openshift-splat-team/fake-center/internal/scenario"
+	"github.com/openshift-splat-team/vcenter-test-profiles/internal/scenario"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/simulator"
 	"github.com/vmware/govmomi/vim25"

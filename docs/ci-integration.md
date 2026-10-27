@@ -1,6 +1,6 @@
 # Component unit tests in OpenShift CI
 
-Run fake-center inside the unit-test pod with nested Podman; no vSphere cluster
+Run vcenter-test-profiles inside the unit-test pod with nested Podman; no vSphere cluster
 profile or hardware is needed. All 13 build farm clusters carry the
 `nested-podman` capability. Request it explicitly so scheduling remains correct.
 
@@ -12,10 +12,10 @@ This example compiles a single Go test package in `test-bin`, then runs its test
 binary in an image based on `ci/nested-podman`. The runtime image needs no Go
 toolchain. Before copying, substitute:
 
-- `./pkg/vsphere`: your package containing fake-center tests.
+- `./pkg/vsphere`: your package containing vcenter-test-profiles tests.
 - `github.com/your-org/your-component/pkg/vsphere/testdata/.`: its scenario directory
   under the checked-out source path. Tests here use `testdata/<scenario>.yaml`.
-- `<tag>`: an existing fake-center `sha-<12>` or release tag; do not leave the
+- `<tag>`: an existing vcenter-test-profiles `sha-<12>` or release tag; do not leave the
   placeholder literal. Use a digest instead if desired.
 
 ```yaml
@@ -30,7 +30,7 @@ test_binary_build_commands: |
 
 images:
   items:
-  - to: fake-center-tests
+  - to: vcenter-test-profiles-tests
     from: nested-podman
     dockerfile_literal: |
       FROM nested-podman
@@ -46,14 +46,14 @@ images:
           destination_dir: testdata/
 
 tests:
-- as: unit-fake-center
+- as: unit-vcenter-test-profiles
   capabilities: [nested-podman]
   nested_podman: true
   commands: |
     export VCENTER_TEST_PROFILES_IMAGE=quay.io/ocp-splat/vcenter-test-profiles:<tag>
     /opt/component-tests/vsphere.test -test.v
   container:
-    from: fake-center-tests
+    from: vcenter-test-profiles-tests
 ```
 
 Append to an existing `test_binary_build_commands` rather than replacing it.
@@ -89,5 +89,5 @@ dependency for these unit tests.
 
 After editing, use the `openshift/release` repository's config validation and
 Prow job generation workflow, commit the generated job changes with the config,
-and rehearse `unit-fake-center` on the PR. A local container test verifies the
+and rehearse `unit-vcenter-test-profiles` on the PR. A local container test verifies the
 scenario/client but does not replace a Prow rehearsal of nested-container setup.
